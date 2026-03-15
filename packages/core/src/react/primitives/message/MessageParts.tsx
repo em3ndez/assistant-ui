@@ -6,8 +6,10 @@ import {
   useMemo,
 } from "react";
 import { useAuiState, useAui } from "@assistant-ui/store";
-import { PartByIndexProvider, TextMessagePartProvider } from "../../providers";
+import { PartByIndexProvider } from "../../providers/PartByIndexProvider";
+import { TextMessagePartProvider } from "../../providers/TextMessagePartProvider";
 import { ChainOfThoughtByIndicesProvider } from "../../providers/ChainOfThoughtByIndicesProvider";
+import { getMessageQuote } from "../../utils/getMessageQuote";
 import type {
   Unstable_AudioMessagePartComponent,
   DataMessagePartComponent,
@@ -21,8 +23,9 @@ import type {
   FileMessagePartComponent,
   ReasoningMessagePartComponent,
   ReasoningGroupComponent,
-} from "../../types";
-import type { MessagePartStatus } from "../../../types";
+  QuoteMessagePartComponent,
+} from "../../types/MessagePartComponentTypes";
+import type { MessagePartStatus } from "../../../types/message";
 import { useShallow } from "zustand/shallow";
 
 type MessagePartRange =
@@ -161,6 +164,8 @@ export namespace MessagePrimitiveParts {
     Unstable_Audio?: Unstable_AudioMessagePartComponent | undefined;
     /** Configuration for data part rendering */
     data?: DataConfig | undefined;
+    /** Component for rendering a quoted message reference (from metadata, not parts) */
+    Quote?: QuoteMessagePartComponent | undefined;
   };
 
   type ToolsConfig =
@@ -460,6 +465,16 @@ const ConditionalEmpty = memo(
     prev.components?.Text === next.components?.Text,
 );
 
+const QuoteRendererImpl: FC<{ Quote: QuoteMessagePartComponent }> = ({
+  Quote,
+}) => {
+  const quoteInfo = useAuiState(getMessageQuote);
+  if (!quoteInfo) return null;
+  return <Quote text={quoteInfo.text} messageId={quoteInfo.messageId} />;
+};
+
+const QuoteRenderer = memo(QuoteRendererImpl);
+
 /**
  * Renders the parts of a message with support for multiple content types.
  *
@@ -549,6 +564,7 @@ export const MessagePrimitiveParts: FC<MessagePrimitiveParts.Props> = ({
 
   return (
     <>
+      {components?.Quote && <QuoteRenderer Quote={components.Quote} />}
       {partsElements}
       <ConditionalEmpty
         components={components}
