@@ -1,5 +1,83 @@
 # @assistant-ui/cloud-ai-sdk
 
+## 0.1.13
+
+### Patch Changes
+
+- [#3909](https://github.com/assistant-ui/assistant-ui/pull/3909) [`005f83f`](https://github.com/assistant-ui/assistant-ui/commit/005f83f3ebfb94b3a9d7c34bc7d2a71bbaf63a9e) - chore: update dependencies ([@Yonom](https://github.com/Yonom))
+
+## 0.1.12
+
+### Patch Changes
+
+- [#3876](https://github.com/assistant-ui/assistant-ui/pull/3876) [`ce865bc`](https://github.com/assistant-ui/assistant-ui/commit/ce865bc46af996d53f89e18068139d4d38546ca6) - chore: update dependencies ([@Yonom](https://github.com/Yonom))
+
+- Updated dependencies [[`ce865bc`](https://github.com/assistant-ui/assistant-ui/commit/ce865bc46af996d53f89e18068139d4d38546ca6)]:
+  - assistant-cloud@0.1.27
+
+## 0.1.11
+
+### Patch Changes
+
+- c988db8: chore: update dependencies
+- Updated dependencies [c988db8]
+  - assistant-cloud@0.1.26
+
+## 0.1.10
+
+### Patch Changes
+
+- 376bb00: chore: update dependencies
+- Updated dependencies [376bb00]
+  - assistant-cloud@0.1.25
+
+## 0.1.9
+
+### Patch Changes
+
+- bdce66f: chore: update dependencies
+- 209ae81: chore: remove aui-source export condition from package.json exports
+- Updated dependencies [bdce66f]
+- Updated dependencies [209ae81]
+  - assistant-cloud@0.1.24
+
+## 0.1.8
+
+### Patch Changes
+
+- 52403c3: chore: update dependencies
+- Updated dependencies [52403c3]
+  - assistant-cloud@0.1.23
+
+## 0.1.7
+
+### Patch Changes
+
+- 736344c: chore: update dependencies
+- c71cb58: chore: update dependencies
+
+## 0.1.6
+
+### Patch Changes
+
+- 349f3c7: chore: update deps
+- Updated dependencies [349f3c7]
+  - assistant-cloud@0.1.22
+
+## 0.1.5
+
+### Patch Changes
+
+- 57e26d2: chore: update dependencies
+
+## 0.1.4
+
+### Patch Changes
+
+- a845911: chore: update dependencies
+- Updated dependencies [a845911]
+  - assistant-cloud@0.1.21
+
 ## 0.1.3
 
 ### Patch Changes

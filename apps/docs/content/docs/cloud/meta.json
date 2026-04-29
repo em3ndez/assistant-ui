@@ -3,8 +3,9 @@
   "description": "AssistantCloud services",
   "icon": "Cloud",
   "root": true,
+  "platforms": ["react"],
   "pages": [
-    "overview",
+    "index",
     "ai-sdk",
     "ai-sdk-assistant-ui",
     "langgraph",

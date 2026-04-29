@@ -1,10 +1,11 @@
-import type { AppendMessage, ThreadMessage } from "../../types";
+import type { AppendMessage, ThreadMessage } from "../../types/message";
 import type { ThreadMessageLike } from "../../runtime/utils/thread-message-like";
 import type { AttachmentAdapter } from "../../adapters/attachment";
 import type {
   SpeechSynthesisAdapter,
   DictationAdapter,
 } from "../../adapters/speech";
+import type { RealtimeVoiceAdapter } from "../../adapters/voice";
 import type { FeedbackAdapter } from "../../adapters/feedback";
 import type {
   AddToolResultOptions,
@@ -59,6 +60,14 @@ type ExternalStoreMessageConverterAdapter<T> = {
 
 type ExternalStoreAdapterBase<T> = {
   isDisabled?: boolean | undefined;
+  /**
+   * Whether the thread is running. When provided, this value flows directly
+   * to `thread.isRunning`, letting the application keep the thread in a
+   * running state even after the last assistant message has completed (for
+   * example while non-message stream chunks like suggestions or metadata
+   * updates are still arriving). When omitted, `thread.isRunning` falls back
+   * to the last-message-status heuristic.
+   */
   isRunning?: boolean | undefined;
   isLoading?: boolean | undefined;
   messages?: readonly T[];
@@ -90,6 +99,7 @@ type ExternalStoreAdapterBase<T> = {
         attachments?: AttachmentAdapter | undefined;
         speech?: SpeechSynthesisAdapter | undefined;
         dictation?: DictationAdapter | undefined;
+        voice?: RealtimeVoiceAdapter | undefined;
         feedback?: FeedbackAdapter | undefined;
         /**
          * @deprecated This API is still under active development and might change without notice.

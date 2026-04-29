@@ -1,6 +1,7 @@
 ---
 title: Attachments
 description: Let users attach files, images, and documents to messages.
+platforms: ["react"]
 ---
 
 import { AttachmentSample } from "@/components/docs/samples/attachment";
@@ -94,14 +95,31 @@ const UserMessage = () => {
 
 ## Built-in Attachment Adapters
 
+### AI SDK Runtime (Default)
+
+When using `useChatRuntime`, the built-in adapter accepts all file types and converts them to base64 data URLs. This works well for images and small files.
+
+<Callout type="warn">
+  Most models only support **image** attachments. Sending unsupported file types (audio, video, PDF, etc.) will result in an API error. Check your model provider's documentation for supported input types.
+</Callout>
+
+To restrict accepted file types, pass a custom adapter:
+
+```tsx
+const runtime = useChatRuntime({
+  adapters: {
+    attachments: new SimpleImageAttachmentAdapter(), // only images
+  },
+});
+```
+
 ### SimpleImageAttachmentAdapter
 
-Handles image files and converts them to data URLs for display in the chat UI. By default, images are shown inline but not sent to the LLM - use the VisionImageAdapter example above to send images to vision-capable models.
+Handles image files and converts them to data URLs for display in the chat UI.
 
 ```tsx
 const imageAdapter = new SimpleImageAttachmentAdapter();
 // Accepts: image/* (JPEG, PNG, GIF, etc.)
-// Output: { type: "image", url: "data:image/..." }
 ```
 
 ### SimpleTextAttachmentAdapter
@@ -111,7 +129,6 @@ Processes text files and wraps content in formatted tags:
 ```tsx
 const textAdapter = new SimpleTextAttachmentAdapter();
 // Accepts: text/plain, text/html, text/markdown, etc.
-// Output: Content wrapped in <attachment>...</attachment> tags
 ```
 
 ### CompositeAttachmentAdapter
@@ -122,7 +139,6 @@ Combines multiple adapters to support various file types:
 const compositeAdapter = new CompositeAttachmentAdapter([
   new SimpleImageAttachmentAdapter(),
   new SimpleTextAttachmentAdapter(),
-  // Add more adapters as needed
 ]);
 ```
 
@@ -157,7 +173,7 @@ class VisionImageAdapter implements AttachmentAdapter {
       type: "image",
       name: file.name,
       file,
-      status: { type: "running" },
+      status: { type: "requires-action", reason: "composer-send" },
     };
   }
 
@@ -224,7 +240,7 @@ class PDFAttachmentAdapter implements AttachmentAdapter {
       type: "document",
       name: file.name,
       file,
-      status: { type: "running" },
+      status: { type: "requires-action", reason: "composer-send" },
     };
   }
 
@@ -360,7 +376,7 @@ class UploadAttachmentAdapter implements AttachmentAdapter {
       type: "file",
       name: file.name,
       file,
-      status: { type: "running", progress: 0 },
+      status: { type: "running", reason: "uploading", progress: 0 },
     } as PendingAttachment;
 
     // Simulate upload progress
@@ -372,7 +388,7 @@ class UploadAttachmentAdapter implements AttachmentAdapter {
         type: "file",
         name: file.name,
         file,
-        status: { type: "running", progress },
+        status: { type: "running", reason: "uploading", progress },
       } as PendingAttachment;
     }
 
@@ -382,7 +398,7 @@ class UploadAttachmentAdapter implements AttachmentAdapter {
       type: "file",
       name: file.name,
       file,
-      status: { type: "running", progress: 100 },
+      status: { type: "running", reason: "uploading", progress: 100 },
     } as PendingAttachment;
   }
 
@@ -436,7 +452,6 @@ class ValidatedImageAdapter implements AttachmentAdapter {
         status: {
           type: "incomplete",
           reason: "error",
-          error: new Error("File size exceeds 5MB limit"),
         },
       };
     }
@@ -456,7 +471,6 @@ class ValidatedImageAdapter implements AttachmentAdapter {
         status: {
           type: "incomplete",
           reason: "error",
-          error,
         },
       };
     }
@@ -467,7 +481,7 @@ class ValidatedImageAdapter implements AttachmentAdapter {
       type: "image",
       name: file.name,
       file,
-      status: { type: "running" },
+      status: { type: "requires-action", reason: "composer-send" },
     };
   }
 
@@ -476,6 +490,29 @@ class ValidatedImageAdapter implements AttachmentAdapter {
   }
 }
 ```
+
+To surface failures in the UI, subscribe to `composer.attachmentAddError`. It fires whenever an add operation produces a failure, in either of two ways:
+
+1. `addAttachment()` rejects: no adapter is configured, the file type does not match `accept`, or the adapter's `add()` throws.
+2. `addAttachment()` resolves but the adapter yielded an attachment whose `status.reason === "error"` (the promise resolves successfully, yet the event still fires so the UI can react).
+
+```tsx
+import { toast } from "sonner"; // or your toast library of choice
+import { useAuiEvent } from "@assistant-ui/react";
+
+function AttachmentErrorToast() {
+  useAuiEvent("composer.attachmentAddError", ({ attachmentId }) => {
+    toast.error(
+      attachmentId
+        ? "Attachment failed to upload."
+        : "This file could not be added.",
+    );
+  });
+  return null;
+}
+```
+
+`attachmentId` is best-effort and should always be treated as optional. It is resolved by scanning the composer's current attachment list for the most recently registered errored attachment, so it is `undefined` for failures that happen before any attachment is registered (e.g. unsupported file type) only when no prior errored attachment is still present.
 
 ### External Source Attachments
 
@@ -500,7 +537,7 @@ await aui.composer().addAttachment({
 });
 ```
 
-External attachments are added as complete attachments directly — they skip the `AttachmentAdapter` entirely and can be removed without one.
+External attachments are added as complete attachments directly. They bypass the `AttachmentAdapter`'s `add()` step (no upload), but `adapter.accept` is still enforced when an `AttachmentAdapter` is configured: a `CreateAttachment` whose `contentType` does not match `adapter.accept` is rejected and emits `composer.attachmentAddError`. If `contentType` is omitted, the descriptor's filename extension is matched against `adapter.accept` only when `accept` itself contains explicit extension entries (e.g. `.png,.pdf`); MIME-wildcard `accept` strings such as `image/*` always require a matching `contentType`. When no `AttachmentAdapter` is configured, external attachments are added without any content-type check, and they can be removed without an adapter.
 
 ### Multiple File Selection
 
@@ -514,7 +551,7 @@ const handleMultipleFiles = async (files: FileList) => {
   const filesToAdd = Array.from(files).slice(0, maxFiles);
 
   for (const file of filesToAdd) {
-    await aui.composer().addAttachment({ file });
+    await aui.composer().addAttachment(file);
   }
 };
 ```
@@ -529,7 +566,7 @@ Attachments are sent to the backend as file content parts.
 
 Attachments work with all assistant-ui runtimes:
 
-- **AI SDK Runtime**: `useChatRuntime`, `useAssistantRuntime`
+- **AI SDK Runtime**: `useChatRuntime`
 - **External Store**: `useExternalStoreRuntime`
 - **LangGraph**: `useLangGraphRuntime`
 - **Custom Runtimes**: Any runtime implementing the attachment interface
@@ -538,6 +575,52 @@ Attachments work with all assistant-ui runtimes:
   The attachment system is designed to be extensible. You can create adapters
   for any file type, integrate with cloud storage services, or implement custom
   processing logic to fit your specific needs.
+</Callout>
+
+## Large File Uploads
+
+The built-in adapters convert files to base64 data URLs in memory. For large files (long audio, video, etc.), this can cause performance issues. Instead, upload to a server and pass the URL:
+
+```tsx
+class ServerUploadAdapter implements AttachmentAdapter {
+  accept = "*";
+  private urls = new Map<string, string>();
+
+  async *add({ file }: { file: File }) {
+    const id = crypto.randomUUID();
+    yield {
+      id, type: "file" as const, name: file.name, file,
+      contentType: file.type,
+      status: { type: "running" as const, reason: "uploading" as const, progress: 0 },
+    };
+
+    const form = new FormData();
+    form.append("file", file);
+    const { url } = await fetch("/api/upload", { method: "POST", body: form }).then(r => r.json());
+    this.urls.set(id, url);
+
+    yield {
+      id, type: "file" as const, name: file.name, file,
+      contentType: file.type,
+      status: { type: "requires-action" as const, reason: "composer-send" as const },
+    };
+  }
+
+  async send(attachment: PendingAttachment): Promise<CompleteAttachment> {
+    const url = this.urls.get(attachment.id)!;
+    this.urls.delete(attachment.id);
+    return {
+      ...attachment, status: { type: "complete" },
+      content: [{ type: "file", data: url, mimeType: attachment.contentType ?? "", filename: attachment.name }],
+    };
+  }
+
+  async remove() {}
+}
+```
+
+<Callout type="tip">
+  [assistant-ui Cloud](/docs/cloud/ai-sdk-assistant-ui) includes `CloudFileAttachmentAdapter` which handles large file uploads via presigned URLs out of the box.
 </Callout>
 
 ## Best Practices
@@ -552,4 +635,4 @@ Attachments work with all assistant-ui runtimes:
 ## Resources
 
 - [Attachment UI Components](/docs/ui/attachment) - UI implementation details
-- [API Reference](/docs/api-reference) - Detailed type definitions
+- [API Reference](/docs/api-reference/overview) - Detailed type definitions

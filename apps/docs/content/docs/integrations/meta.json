@@ -1,0 +1,16 @@
+{
+  "title": "Integrations",
+  "icon": "Plug",
+  "root": true,
+  "platforms": ["react"],
+  "pages": [
+    "index",
+    "frameworks",
+    "tools",
+    "gateways",
+    "observability",
+    "auth",
+    "persistence",
+    "attachments"
+  ]
+}

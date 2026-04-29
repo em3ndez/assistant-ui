@@ -1,5 +1,78 @@
 # @assistant-ui/store
 
+## 0.2.9
+
+### Patch Changes
+
+- [#3909](https://github.com/assistant-ui/assistant-ui/pull/3909) [`005f83f`](https://github.com/assistant-ui/assistant-ui/commit/005f83f3ebfb94b3a9d7c34bc7d2a71bbaf63a9e) - chore: update dependencies ([@Yonom](https://github.com/Yonom))
+
+- Updated dependencies [[`005f83f`](https://github.com/assistant-ui/assistant-ui/commit/005f83f3ebfb94b3a9d7c34bc7d2a71bbaf63a9e)]:
+  - @assistant-ui/tap@0.5.10
+
+## 0.2.8
+
+### Patch Changes
+
+- [#3876](https://github.com/assistant-ui/assistant-ui/pull/3876) [`ce865bc`](https://github.com/assistant-ui/assistant-ui/commit/ce865bc46af996d53f89e18068139d4d38546ca6) - chore: update dependencies ([@Yonom](https://github.com/Yonom))
+
+- Updated dependencies [[`ce865bc`](https://github.com/assistant-ui/assistant-ui/commit/ce865bc46af996d53f89e18068139d4d38546ca6), [`055dda5`](https://github.com/assistant-ui/assistant-ui/commit/055dda54b68031d0c9c760bf89a7c1036dd2174d), [`d53ff4f`](https://github.com/assistant-ui/assistant-ui/commit/d53ff4f3f8b7d7220c1cb274c4fda335598fb063)]:
+  - @assistant-ui/tap@0.5.9
+
+## 0.2.7
+
+### Patch Changes
+
+- c988db8: chore: update dependencies
+- Updated dependencies [c988db8]
+  - @assistant-ui/tap@0.5.8
+
+## 0.2.6
+
+### Patch Changes
+
+- bdce66f: chore: update dependencies
+- 209ae81: chore: remove aui-source export condition from package.json exports
+- 2dd0c9f: feat: add forwardTransformScopes utility
+- Updated dependencies [bdce66f]
+- Updated dependencies [209ae81]
+  - @assistant-ui/tap@0.5.6
+
+## 0.2.5
+
+### Patch Changes
+
+- 52403c3: chore: update dependencies
+- Updated dependencies [52403c3]
+  - @assistant-ui/tap@0.5.5
+
+## 0.2.4
+
+### Patch Changes
+
+- 28a987a: feat: SingleThreadList resource
+  refactor: attachTransformScopes should mutate the scopes instead of cloning it
+- 736344c: chore: update dependencies
+- c71cb58: chore: update dependencies
+- Updated dependencies [736344c]
+- Updated dependencies [c71cb58]
+  - @assistant-ui/tap@0.5.4
+
+## 0.2.3
+
+### Patch Changes
+
+- 349f3c7: chore: update deps
+- Updated dependencies [349f3c7]
+  - @assistant-ui/tap@0.5.3
+
+## 0.2.2
+
+### Patch Changes
+
+- a845911: chore: update dependencies
+- Updated dependencies [a845911]
+  - @assistant-ui/tap@0.5.2
+
 ## 0.2.1
 
 ### Patch Changes

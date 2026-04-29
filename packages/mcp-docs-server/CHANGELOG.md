@@ -1,5 +1,48 @@
 # @assistant-ui/mcp-docs-server
 
+## 0.1.30
+
+### Patch Changes
+
+- [#3876](https://github.com/assistant-ui/assistant-ui/pull/3876) [`ce865bc`](https://github.com/assistant-ui/assistant-ui/commit/ce865bc46af996d53f89e18068139d4d38546ca6) - chore: update dependencies ([@Yonom](https://github.com/Yonom))
+
+## 0.1.29
+
+### Patch Changes
+
+- c988db8: chore: update dependencies
+
+## 0.1.28
+
+### Patch Changes
+
+- 376bb00: chore: update dependencies
+
+## 0.1.27
+
+### Patch Changes
+
+- bdce66f: chore: update dependencies
+- 209ae81: chore: remove aui-source export condition from package.json exports
+
+## 0.1.26
+
+### Patch Changes
+
+- 52403c3: chore: update dependencies
+
+## 0.1.25
+
+### Patch Changes
+
+- 349f3c7: chore: update deps
+
+## 0.1.24
+
+### Patch Changes
+
+- a845911: chore: update dependencies
+
 ## 0.1.23
 
 ### Patch Changes
