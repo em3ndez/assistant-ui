@@ -49,6 +49,26 @@ describe("CloudMessagePersistence", () => {
     expect(await persistence.getRemoteId("local-1")).toBe("remote-1");
   });
 
+  it.each(["__proto__", "constructor", "toString"])(
+    "supports prototype-named local ID %s",
+    async (messageId) => {
+      vi.mocked(cloud.threads.messages.create).mockResolvedValue({
+        message_id: `remote-${messageId}`,
+      });
+
+      expect(persistence.isPersisted(messageId)).toBe(false);
+
+      await persistence.append("thread-1", messageId, null, "aui/v0", {
+        text: "hello",
+      });
+
+      expect(persistence.isPersisted(messageId)).toBe(true);
+      expect(await persistence.getRemoteId(messageId)).toBe(
+        `remote-${messageId}`,
+      );
+    },
+  );
+
   it("uses the current client without losing ID mappings", async () => {
     const firstCloud = createMockCloud();
     const secondCloud = createMockCloud();
@@ -231,6 +251,27 @@ describe("CloudMessagePersistence", () => {
     await persistence.load("thread-1");
 
     expect(persistence.isPersisted("msg-1")).toBe(true);
+  });
+
+  it("maps prototype-named loaded messages", async () => {
+    vi.mocked(cloud.threads.messages.list).mockResolvedValue({
+      messages: [
+        {
+          id: "__proto__",
+          parent_id: null,
+          height: 0,
+          created_at: "2025-01-01T00:00:00Z" as unknown as Date,
+          updated_at: "2025-01-01T00:00:00Z" as unknown as Date,
+          format: "aui/v0",
+          content: { text: "loaded" },
+        },
+      ],
+    });
+
+    await persistence.load("thread-1");
+
+    expect(persistence.isPersisted("__proto__")).toBe(true);
+    expect(await persistence.getRemoteId("__proto__")).toBe("__proto__");
   });
 
   it("follows the message cursor across pages in server order", async () => {
