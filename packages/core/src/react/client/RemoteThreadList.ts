@@ -25,6 +25,7 @@ import {
   createThreadMappingId,
   getThreadData,
   normalizeCursor,
+  reconcileInitializedThread,
   updateStatusReducer,
   type RemoteThreadData,
   type RemoteThreadState,
@@ -39,7 +40,6 @@ import type {
 import { ThreadListAdapterChangedError } from "../../runtimes/remote-thread-list/adapter-changed";
 import type { ThreadMessage } from "../../types/message";
 import { handleThreadListAction } from "../../store/runtime-clients/handle-thread-list-action";
-import { nullProtoRecord } from "../../utils/record";
 import {
   inMemoryThreadListTransformScopes,
   type InMemoryThreadListProps,
@@ -908,6 +908,8 @@ const useRemoteThreadList = (
         requireAdapterGeneration(adapterGeneration);
         return result;
       }
+      let removedMappingId: string | undefined;
+      let replacementMainThreadId: string | undefined;
       const result = await store.optimisticUpdate({
         execute: () => {
           requireAdapterGeneration(adapterGeneration);
@@ -931,53 +933,50 @@ const useRemoteThreadList = (
         },
         then: (state, { remoteId, externalId }) => {
           if (adapterGeneration !== session.adapterGeneration) return state;
-          const data = getThreadData(state, threadId);
-          if (!data) return state;
-          const mappingId = createThreadMappingId(threadId);
-          // A list() response that landed while this initialize was in flight
-          // could not know the remote id yet, so it may have minted its own
-          // slot for it; that slot collapses into this one.
-          const listedMappingId = Object.hasOwn(state.threadIdMap, remoteId)
-            ? state.threadIdMap[remoteId]
-            : undefined;
-          const orphan =
-            listedMappingId !== undefined &&
-            listedMappingId !== mappingId &&
-            Object.hasOwn(state.threadData, listedMappingId)
-              ? state.threadData[listedMappingId]
-              : undefined;
-
-          const threadData = nullProtoRecord(state.threadData);
-          if (orphan !== undefined) delete threadData[listedMappingId!];
-          threadData[mappingId] = {
-            ...data,
-            initializeTask: Promise.resolve({ remoteId, externalId }),
+          // Background mode still owns the initializing body. Single-body mode
+          // has already replaced it, so retain the currently mounted body.
+          const retainedThreadId = backgroundThreads
+            ? threadId
+            : session.mainThreadId;
+          const reconciliation = reconcileInitializedThread(
+            state,
+            threadId,
             remoteId,
             externalId,
-          } as RemoteThreadData;
-
-          const rewire = (ids: readonly string[]) =>
-            orphan === undefined ? ids : ids.filter((id) => id !== orphan.id);
-
-          return {
-            ...state,
-            threadIds: rewire(state.threadIds),
-            archivedThreadIds: rewire(state.archivedThreadIds),
-            threadIdMap: {
-              ...state.threadIdMap,
-              [remoteId]: mappingId,
-            },
-            threadData,
-          };
+            retainedThreadId,
+          );
+          removedMappingId = reconciliation.removedMappingId;
+          if (removedMappingId === session.mainThreadId) {
+            replacementMainThreadId = reconciliation.survivorMappingId;
+          }
+          return reconciliation.state;
         },
       });
       requireAdapterGeneration(adapterGeneration);
+      if (removedMappingId !== undefined) {
+        setStartedIds((prev) =>
+          prev.filter((startedId) => startedId !== removedMappingId),
+        );
+      }
+      if (
+        replacementMainThreadId !== undefined &&
+        session.mainThreadId === removedMappingId
+      ) {
+        assignMainThreadId(replacementMainThreadId);
+      }
       if (threadId === session.mainThreadId) {
         notifyRemoteId(result.remoteId, true);
       }
       return toInitializeResult(result);
     },
-    [notifyRemoteId, requireAdapterGeneration, session, store],
+    [
+      assignMainThreadId,
+      backgroundThreads,
+      notifyRemoteId,
+      requireAdapterGeneration,
+      session,
+      store,
+    ],
   );
 
   const rename = useCallback(
