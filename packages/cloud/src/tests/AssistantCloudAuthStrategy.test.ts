@@ -1,3 +1,4 @@
+/// <reference types="node" />
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   AssistantCloudAnonymousAuthStrategy,
@@ -73,8 +74,10 @@ describe("AssistantCloudAnonymousAuthStrategy", () => {
   });
 
   it("reads the token stored for a base url given with a trailing slash", () => {
+    // The two-step cast below erases the contextual Storage typing the plain
+    // `as Storage` sites get, so this parameter needs its own annotation.
     installLocalStorage({
-      getItem: (key) =>
+      getItem: (key: string) =>
         key === refreshTokenKey ? JSON.stringify(refreshToken) : null,
       setItem: vi.fn(),
       removeItem: vi.fn(),
@@ -335,7 +338,7 @@ describe("AssistantCloudAnonymousAuthStrategy", () => {
                 { once: true },
               );
             }),
-        } as Response),
+        } as unknown as Response),
       )
       .mockResolvedValueOnce({
         ok: true,
@@ -664,7 +667,7 @@ describe("AssistantCloudAnonymousAuthStrategy", () => {
     const removeItem = vi.fn(() => {
       throw new DOMException("blocked", "SecurityError");
     });
-    installLocalStorage({ getItem, setItem, removeItem } as Storage);
+    installLocalStorage({ getItem, setItem, removeItem } as unknown as Storage);
     mockAnonymousTokenFetch();
 
     await expect(
