@@ -295,12 +295,17 @@ export class AgUiThreadRuntimeCore {
 
   async append(message: AppendMessage): Promise<void> {
     const startRun = message.startRun ?? message.role === "user";
+    let ownsThread = true;
     if (startRun) {
       this.assertNoPendingInterrupts();
       this.maybeAutoCancelPendingToolCalls();
+      // Before the message is linked: callers parent it on the in-flight
+      // assistant, and settling that assistant reassigns its optimistic id,
+      // which would evict it and reparent this message onto a branch.
+      ownsThread = this.supersedeActiveRun();
     }
     const threadMessageId = this.appendEntry(message);
-    if (!startRun) return;
+    if (!startRun || !ownsThread) return;
     await this.startRun(threadMessageId, message.runConfig);
   }
 
@@ -343,17 +348,44 @@ export class AgUiThreadRuntimeCore {
   }
 
   async cancel(): Promise<void> {
-    if (!this.abortController) return;
-    // Before the local abort, whose listener runs onCancel synchronously: a
-    // callback that starts another run replaces the agent's controller, and
-    // aborting afterwards would kill that replacement and leave this run live.
-    // The local abort is unconditional because abortRun is a user subclass's
-    // code, and a throw there would otherwise strand the thread as running.
+    this.abortActiveRun();
+  }
+
+  // abortRun is what stops an upstream agent: AbstractAgent.runAgent declares
+  // two parameters and HttpAgent binds its request to a controller of its own,
+  // so the run options object reaches only subclasses that read it. The local
+  // abort comes last and is unconditional: its listener runs onCancel
+  // synchronously, so a callback that starts another run must keep the
+  // controller it installed, and a throw from a subclass's abortRun would
+  // otherwise strand the thread as running.
+  private abortActiveRun(): void {
+    const controller = this.abortController;
+    if (!controller) return;
     try {
       (this.activeRunAgent ?? this.agent).abortRun();
     } finally {
-      this.abortController.abort();
+      controller.abort();
     }
+  }
+
+  // Starting a run supersedes the active one, and reports whether the caller
+  // still owns the thread afterwards: the local abort runs onCancel
+  // synchronously, so a callback that starts its own run keeps it. abortRun is a
+  // subclass's code, and a throw there must not abandon the run being started,
+  // unlike cancel(), where the failed operation is the caller's own. Calling
+  // this twice for one run is harmless, because the second call finds no active
+  // run to supersede.
+  private supersedeActiveRun(): boolean {
+    try {
+      this.abortActiveRun();
+    } catch (error) {
+      this.logger.error?.("[agui] agent abortRun failed", error);
+    }
+    if (this.abortController === null) return true;
+    this.logger.debug?.(
+      "[agui] onCancel started a replacement run; dropping the superseding send",
+    );
+    return false;
   }
 
   async resume(config: ResumeRunConfig): Promise<void> {
@@ -987,6 +1019,11 @@ export class AgUiThreadRuntimeCore {
     resume?: AgUiResumeEntry[],
     resumeStream?: ResumeStream,
   ): Promise<void> {
+    // A default AG-UI run supersedes the active run; the hook's opt-in message
+    // queue serializes sends instead. append supersedes earlier, before it links
+    // its message; this covers the entry points that start a run without one.
+    if (!this.supersedeActiveRun()) return;
+
     const normalizedRunConfig = runConfig ?? {};
     this.lastRunConfig = normalizedRunConfig;
     const parent =

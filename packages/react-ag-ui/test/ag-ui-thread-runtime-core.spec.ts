@@ -1208,6 +1208,141 @@ describe("AGUIThreadRuntimeCore", () => {
     });
   });
 
+  it("aborts the superseded HttpAgent request when a later append starts", async () => {
+    const requestSignals: AbortSignal[] = [];
+    let resolveFirstRequest!: () => void;
+    const firstRequestStarted = new Promise<void>((resolve) => {
+      resolveFirstRequest = resolve;
+    });
+    const agent = new HttpAgent({
+      url: "https://example.invalid",
+      fetch: async (_url, requestInit) => {
+        const signal = requestInit.signal;
+        if (!signal) throw new Error("missing request signal");
+        requestSignals.push(signal);
+        if (requestSignals.length === 1) resolveFirstRequest();
+        return await new Promise<Response>((_, reject) => {
+          signal.addEventListener(
+            "abort",
+            () => {
+              const error = new Error("aborted");
+              error.name = "AbortError";
+              reject(error);
+            },
+            { once: true },
+          );
+        });
+      },
+    });
+
+    const core = createCore(agent);
+    const superseded = core.append(createAppendMessage());
+    await firstRequestStarted;
+
+    void core.append(createAppendMessage());
+    await superseded;
+    await vi.waitFor(() => expect(requestSignals).toHaveLength(2));
+
+    expect(requestSignals[0]?.aborted).toBe(true);
+    expect(requestSignals[1]?.aborted).toBe(false);
+  });
+
+  it("keeps the thread linear when an append supersedes a run", async () => {
+    const runInputs: any[] = [];
+    const agent = {
+      runAgent: vi.fn(
+        (_input: any, subscriber: AgentSubscriber, { signal }: any) => {
+          runInputs.push(_input);
+          if (runInputs.length > 1) {
+            subscriber.onRunFinalized?.();
+            return Promise.resolve();
+          }
+          subscriber.onTextMessageContentEvent?.({
+            event: { type: "TEXT_MESSAGE_CONTENT", delta: "partial" },
+          } as never);
+          return new Promise<void>((resolve) => {
+            signal.addEventListener("abort", () => resolve(), { once: true });
+          });
+        },
+      ),
+      abortRun: vi.fn(),
+    } as unknown as HttpAgent;
+
+    const core = createCore(agent);
+    void core.append(createAppendMessage());
+    await vi.waitFor(() => expect(runInputs).toHaveLength(1));
+
+    // callers parent the next message on the in-flight assistant
+    const inFlightAssistantId = core.getMessages().at(-1)!.id;
+    await core.append(createAppendMessage({ parentId: inFlightAssistantId }));
+
+    const parents = core
+      .getMessageRepository()
+      .messages.map(({ parentId }) => parentId);
+    expect(new Set(parents).size).toBe(parents.length);
+    expect(runInputs[1].messages.map((m: { role: string }) => m.role)).toEqual([
+      "user",
+      "assistant",
+      "user",
+    ]);
+  });
+
+  it("starts the superseding run when a subclass abortRun throws", async () => {
+    const runInputs: unknown[] = [];
+    const agent = {
+      runAgent: vi.fn((input: unknown, subscriber: AgentSubscriber) => {
+        runInputs.push(input);
+        if (runInputs.length > 1) {
+          subscriber.onRunFinalized?.();
+          return Promise.resolve();
+        }
+        return new Promise<void>(() => {});
+      }),
+      abortRun: vi.fn(() => {
+        throw new Error("subclass abortRun blew up");
+      }),
+    } as unknown as HttpAgent;
+    const logger = { ...noopLogger, error: vi.fn() };
+
+    const core = createCore(agent, { logger });
+    void core.append(createAppendMessage());
+    await core.append(createAppendMessage());
+
+    expect(runInputs).toHaveLength(2);
+    expect(logger.error).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps a run started by onCancel when an append supersedes", async () => {
+    const resolveRuns: Array<() => void> = [];
+    let core!: AgUiThreadRuntimeCore;
+    const onCancel = vi.fn(() => {
+      void core.append(createAppendMessage());
+    });
+    const agent = {
+      runAgent: vi.fn(
+        () =>
+          new Promise<void>((resolve) => {
+            resolveRuns.push(resolve);
+          }),
+      ),
+      abortRun: vi.fn(),
+    } as unknown as HttpAgent;
+
+    core = createCore(agent, { onCancel });
+    const superseded = core.append(createAppendMessage());
+    void core.append(createAppendMessage());
+
+    // the superseding append cancelled the first run, and onCancel started its
+    // own; that replacement owns the thread, so the append must not run again
+    expect(onCancel).toHaveBeenCalledTimes(1);
+    expect(resolveRuns).toHaveLength(2);
+    expect(core.isRunning()).toBe(true);
+
+    resolveRuns[0]?.();
+    await superseded;
+    expect(core.isRunning()).toBe(true);
+  });
+
   it("surfaces errors and rejects append", async () => {
     const agent = {
       runAgent: vi.fn(async () => {
@@ -6268,6 +6403,7 @@ describe("AGUIThreadRuntimeCore", () => {
         }
         subscriber.onRunFinalized?.();
       }),
+      abortRun: vi.fn(),
     } as unknown as HttpAgent;
     const core = createCore(agent);
 
@@ -6294,6 +6430,7 @@ describe("AGUIThreadRuntimeCore", () => {
         if (runInputs.length === 1) await activeRun;
         subscriber.onRunFinalized?.();
       }),
+      abortRun: vi.fn(),
     } as unknown as HttpAgent;
     const core = createCore(agent);
 
@@ -6363,6 +6500,7 @@ describe("AGUIThreadRuntimeCore", () => {
         if (runInputs.length === 1) await activeRun;
         subscriber.onRunFinalized?.();
       }),
+      abortRun: vi.fn(),
     } as unknown as HttpAgent;
     const core = createCore(agent);
 
