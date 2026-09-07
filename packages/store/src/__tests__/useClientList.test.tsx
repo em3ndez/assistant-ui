@@ -29,8 +29,8 @@ const ItemClient = resource(useItemClient);
 const useThreadClient = () => {
   const list = useClientList({
     initialValues: [
-      { id: "a", label: "A" },
-      { id: "b", label: "B" },
+      { id: "10", label: "A" },
+      { id: "2", label: "B" },
     ],
     getKey: (data: ItemData) => data.id,
     resource: ItemClient,
@@ -60,29 +60,29 @@ afterEach(() => {
 });
 
 describe("useClientList", () => {
-  it("exposes initial values as client states, in order", () => {
+  it("preserves insertion order for integer-like keys", () => {
     const { hook } = setup();
     expect(hook.result.current).toEqual([
-      { id: "a", label: "A" },
-      { id: "b", label: "B" },
+      { id: "10", label: "A" },
+      { id: "2", label: "B" },
     ]);
   });
 
-  it("add mounts a new client and notifies subscribers", () => {
+  it("appends integer-like keys and notifies subscribers", () => {
     const { getAui, hook } = setup();
     const subscriber = vi.fn();
     getAui().subscribe(subscriber);
 
-    act(() => flushTapSync(() => getAui().thread.add({ id: "c", label: "C" })));
+    act(() => flushTapSync(() => getAui().thread.add({ id: "1", label: "C" })));
 
     expect(subscriber).toHaveBeenCalled();
     expect(hook.result.current).toEqual([
-      { id: "a", label: "A" },
-      { id: "b", label: "B" },
-      { id: "c", label: "C" },
+      { id: "10", label: "A" },
+      { id: "2", label: "B" },
+      { id: "1", label: "C" },
     ]);
-    expect(getAui().thread.item({ key: "c" }).getState()).toEqual({
-      id: "c",
+    expect(getAui().thread.item({ key: "1" }).getState()).toEqual({
+      id: "1",
       label: "C",
     });
   });
@@ -94,15 +94,15 @@ describe("useClientList", () => {
     act(() => flushTapSync(() => getAui().thread.add(data)));
 
     expect(hook.result.current).toEqual([
-      { id: "a", label: "A" },
-      { id: "b", label: "B" },
+      { id: "10", label: "A" },
+      { id: "2", label: "B" },
       { id: "constructor", label: "Added" },
     ]);
     expect(getAui().thread.item({ key: "constructor" }).getState()).toEqual(
       data,
     );
-    expect(getAui().thread.item({ key: "a" }).getState()).toEqual({
-      id: "a",
+    expect(getAui().thread.item({ key: "10" }).getState()).toEqual({
+      id: "10",
       label: "A",
     });
 
@@ -122,24 +122,26 @@ describe("useClientList", () => {
     ).toThrow(/already exists/);
   });
 
-  it("remove unmounts the client and notifies subscribers", () => {
+  it("preserves integer-like key order after removal and notifies subscribers", () => {
     const { getAui, hook } = setup();
+    act(() => flushTapSync(() => getAui().thread.add({ id: "1", label: "C" })));
     const subscriber = vi.fn();
     getAui().subscribe(subscriber);
 
-    act(() => flushTapSync(() => getAui().thread.item({ key: "a" }).remove()));
+    act(() => flushTapSync(() => getAui().thread.item({ key: "2" }).remove()));
 
     expect(subscriber).toHaveBeenCalled();
-    expect(hook.result.current).toEqual([{ id: "b", label: "B" }]);
-    expect(() => getAui().thread.item({ key: "a" })).toThrow(
-      'key "a" not found',
-    );
+    expect(hook.result.current).toEqual([
+      { id: "10", label: "A" },
+      { id: "1", label: "C" },
+    ]);
+    expect(() => getAui().thread.item({ key: "2" })).toThrow(/not found/);
   });
 
   it("lookup works by index and by key", () => {
     const { getAui } = setup();
     expect(getAui().thread.item({ index: 1 }).getState()).toEqual({
-      id: "b",
+      id: "2",
       label: "B",
     });
     expect(() => getAui().thread.item({ index: 2 })).toThrow("out of bounds");
@@ -149,8 +151,8 @@ describe("useClientList", () => {
     const { getAui } = setup();
     expect(() =>
       act(() =>
-        flushTapSync(() => getAui().thread.add({ id: "a", label: "A2" })),
+        flushTapSync(() => getAui().thread.add({ id: "10", label: "A2" })),
       ),
-    ).toThrow("key a that already exists");
+    ).toThrow("key 10 that already exists");
   });
 });
