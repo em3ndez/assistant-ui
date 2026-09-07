@@ -144,7 +144,9 @@ type MCPManagerState = {
 type MCPPersistedAuthState = {
   serverUrl?: string;
   tokens?: OAuthTokens;
+  tokensClientId?: string;
   clientInformation?: OAuthClientInformationFull;
+  clientInformationSource?: "registered";
   codeVerifier?: string;
   state?: string;
   discoveryState?: OAuthDiscoveryState;
