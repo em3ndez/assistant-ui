@@ -173,8 +173,9 @@ export class AgUiThreadRuntimeCore {
   private _isLoading = false;
   private _loadPromise: Promise<void> | undefined;
   private _loadRequested = false;
-  private pendingResumeMessageId: string | null = null;
-  private pendingA2uiResume = false;
+  private pendingResume: { owner: AbortController; messageId: string } | null =
+    null;
+  private pendingA2uiResumeOwner: AbortController | null = null;
   private pendingA2uiAction: Record<string, unknown> | undefined;
 
   constructor(options: CoreOptions) {
@@ -878,8 +879,9 @@ export class AgUiThreadRuntimeCore {
     }
     this.pendingA2uiAction = userAction;
 
-    if (this.isRunningFlag) {
-      this.pendingA2uiResume = true;
+    const owner = this.abortController;
+    if (owner) {
+      this.pendingA2uiResumeOwner = owner;
       return;
     }
     this.startResumeRun(parentId);
@@ -891,10 +893,11 @@ export class AgUiThreadRuntimeCore {
   private maybeResumeAfterToolResults(messageId: string): void {
     if (!this.maybeCompleteAfterToolResults(messageId)) return;
 
-    if (this.isRunningFlag) {
+    const owner = this.abortController;
+    if (owner) {
       // A run is still draining (RUN_FINISHED arrived but the stream has not
       // closed). Defer until startRun's tail so we never start two runs.
-      this.pendingResumeMessageId = messageId;
+      this.pendingResume = { owner, messageId };
       return;
     }
     this.startResumeRun(messageId);
@@ -944,7 +947,7 @@ export class AgUiThreadRuntimeCore {
   }
 
   applyExternalMessages(messages: readonly ThreadMessage[]): void {
-    this.pendingA2uiResume = false;
+    this.pendingA2uiResumeOwner = null;
     this.pendingA2uiAction = undefined;
     this.assistantHistoryParents.clear();
 
@@ -989,6 +992,17 @@ export class AgUiThreadRuntimeCore {
     this.snapshotHistoryIds.clear();
     for (const { message } of this.getMessageRepository().messages) {
       this.snapshotHistoryIds.add(message.id);
+    }
+    // MESSAGES_SNAPSHOT re-appends the active assistant, so a parked
+    // continuation whose target survived the snapshot is still answerable.
+    // Membership is the head branch, not the repository: a soft merge leaves
+    // the messages it dropped behind as off-branch nodes.
+    const resumeTarget = this.pendingResume?.messageId;
+    if (
+      resumeTarget !== undefined &&
+      !this.session.getMessages().some((message) => message.id === resumeTarget)
+    ) {
+      this.pendingResume = null;
     }
     this.notifyUpdate();
   }
@@ -1222,26 +1236,22 @@ export class AgUiThreadRuntimeCore {
     if (pendingError) {
       const err = pendingError;
       this.reportedErrors.add(err);
-      this.pendingResumeMessageId = null;
-      this.pendingA2uiResume = false;
-      this.pendingA2uiAction = undefined;
+      this.clearDeferredContinuations(abortController);
       throw err;
     }
 
     // A tool result that landed before the run settled deferred its
     // continuation here so a second run never overlaps the first.
-    if (this.pendingResumeMessageId !== null) {
-      const resumeMessageId = this.pendingResumeMessageId;
-      this.pendingResumeMessageId = null;
+    if (this.pendingResume?.owner === abortController) {
+      const { messageId } = this.pendingResume;
+      this.pendingResume = null;
       if (!abortSignal.aborted) {
-        this.startResumeRun(resumeMessageId);
-      } else {
-        this.pendingA2uiAction = undefined;
+        this.startResumeRun(messageId);
       }
     }
 
-    if (this.pendingA2uiResume) {
-      this.pendingA2uiResume = false;
+    if (this.pendingA2uiResumeOwner === abortController) {
+      this.pendingA2uiResumeOwner = null;
       if (!abortSignal.aborted && this.pendingA2uiAction !== undefined) {
         if (this.getPendingInterrupts()) {
           this.pendingA2uiAction = undefined;
@@ -1281,7 +1291,7 @@ export class AgUiThreadRuntimeCore {
     },
   ): Promise<Error | undefined> {
     this.pendingA2uiAction = undefined;
-    this.pendingA2uiResume = false;
+    this.pendingA2uiResumeOwner = null;
     const assistantId = ctx.ensureAssistant();
     const currentId = () => ctx.getAssistantMessageId() ?? assistantId;
     const options: ChatModelRunOptions = {
@@ -1358,6 +1368,16 @@ export class AgUiThreadRuntimeCore {
     };
     this.pendingA2uiAction = undefined;
     return input;
+  }
+
+  private clearDeferredContinuations(owner: AbortController): void {
+    if (this.pendingResume?.owner === owner) {
+      this.pendingResume = null;
+    }
+    if (this.pendingA2uiResumeOwner === owner) {
+      this.pendingA2uiResumeOwner = null;
+      this.pendingA2uiAction = undefined;
+    }
   }
 
   private setRunning(running: boolean) {
