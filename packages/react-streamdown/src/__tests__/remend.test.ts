@@ -133,6 +133,31 @@ describe("tailBoundedRemend", () => {
     expect(blocksOf(tailBoundedRemend(text))).toEqual(blocksOf(remend(text)));
   });
 
+  it("ignores escaped math delimiters", () => {
+    const text = "before\n\nescaped \\$$ marker\n\nlast **b";
+    expect(findRemendWindowStart(text)).toBe(text.indexOf("last"));
+  });
+
+  // The boundary pass runs on every streaming flush, so its cost has to stay
+  // linear in the message. An unbounded search per line reads the rest of the
+  // message before the loop rejects it, which no behavioural assertion can see.
+  it("searches once per line", () => {
+    const text = `${"20~25\n\n".repeat(50)}tail **b`;
+    let searches = 0;
+    const original = String.prototype.indexOf;
+    String.prototype.indexOf = function (this: string, ...args) {
+      searches += 1;
+      return original.apply(this, args);
+    };
+    try {
+      findRemendWindowStart(text);
+    } finally {
+      String.prototype.indexOf = original;
+    }
+
+    expect(searches).toBe(text.split("\n").length);
+  });
+
   it("matches full remend when $$ appears inside a math block", () => {
     for (const text of [
       "intro\n\n$$\nsome content with $$ inside\n\nmore content",
