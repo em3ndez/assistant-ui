@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { abortableIterable } from "./abortableIterable";
+import { abortableIterable, openAbortableIterable } from "./abortable-iterable";
 
 const deferred = <T>() => {
   let resolve!: (value: T) => void;
@@ -16,6 +16,27 @@ const collect = async <T>(iterable: AsyncIterable<T>) => {
 };
 
 describe("abortableIterable", () => {
+  it("settles an opening stream on abort and finalizes a late iterable", async () => {
+    const opened = deferred<AsyncIterable<number>>();
+    const finalize = vi.fn(async () => ({
+      done: true as const,
+      value: undefined,
+    }));
+    const controller = new AbortController();
+
+    const opening = openAbortableIterable(opened.promise, controller.signal);
+    controller.abort();
+
+    await expect(opening).resolves.toBeUndefined();
+    opened.resolve({
+      [Symbol.asyncIterator]: () => ({
+        next: () => Promise.resolve({ done: true, value: undefined }),
+        return: finalize,
+      }),
+    });
+    await vi.waitFor(() => expect(finalize).toHaveBeenCalledTimes(1));
+  });
+
   it("passes a stream that completes on its own through untouched", async () => {
     async function* source() {
       yield 1;
@@ -114,6 +135,25 @@ describe("abortableIterable", () => {
     await expect(
       collect(abortableIterable(source(), controller.signal)),
     ).rejects.toThrow("stream failed");
+  });
+
+  it("finalizes a source after its next call rejects", async () => {
+    const finalize = vi.fn(async () => ({
+      done: true as const,
+      value: undefined,
+    }));
+    const source: AsyncIterable<number> = {
+      [Symbol.asyncIterator]: () => ({
+        next: () => Promise.reject(new Error("stream failed")),
+        return: finalize,
+      }),
+    };
+    const controller = new AbortController();
+
+    await expect(
+      collect(abortableIterable(source, controller.signal)),
+    ).rejects.toThrow("stream failed");
+    expect(finalize).toHaveBeenCalledTimes(1);
   });
 
   it("finalizes the source when the consumer breaks out", async () => {
