@@ -404,6 +404,54 @@ describe("RemoteThreadList", () => {
     handle.destroy();
   });
 
+  it("clears the deleted thread's title state so a reborn slot can auto-title", async () => {
+    const adapter = makeAdapter({
+      list: vi.fn(async () => ({
+        threads: [
+          { status: "regular" as const, remoteId: "t1", title: "One" },
+          { status: "regular" as const, remoteId: "t2", title: "Two" },
+        ],
+      })),
+    });
+    const { handle } = mountList(adapter);
+    const aui = handle.getClient();
+    await aui.threads.getLoadThreadsPromise();
+    await vi.waitFor(() => {
+      expect(aui.threads.getState().threadIds).toEqual(["t1", "t2"]);
+    });
+
+    await aui.threads.item({ id: "t1" }).rename("Manual title");
+    await aui.threads.item({ id: "t2" }).rename("Kept manual title");
+    await aui.threads.item({ id: "t1" }).delete();
+    await vi.waitFor(() => {
+      expect(aui.threads.getState().threadIds).toEqual(["t2"]);
+    });
+
+    // The server still lists t1, so a reload rebirths the slot under the same
+    // remote id; a leaked manual-rename entry would suppress its auto-title.
+    await aui.threads.reload();
+    await vi.waitFor(() => {
+      expect(aui.threads.getState().threadIds).toEqual(["t1", "t2"]);
+    });
+    flushTapSync(() => aui.threads.switchToThread("t1"));
+    await vi.waitFor(() => {
+      expect(aui.threads.getState().mainThreadId).toBe("t1");
+    });
+
+    await aui.threads.item({ id: "t1" }).generateTitle({ automatic: true });
+    expect(adapter.generateTitle).toHaveBeenCalledOnce();
+
+    // t2 is the control: a reload that cleared every title state would
+    // generate here as well.
+    flushTapSync(() => aui.threads.switchToThread("t2"));
+    await vi.waitFor(() => {
+      expect(aui.threads.getState().mainThreadId).toBe("t2");
+    });
+    await aui.threads.item({ id: "t2" }).generateTitle({ automatic: true });
+    expect(adapter.generateTitle).toHaveBeenCalledOnce();
+    handle.destroy();
+  });
+
   it("keeps a manual rename made during automatic title generation", async () => {
     const generatedTitle = deferred<ReadableStream>();
     const adapter = makeAdapter({
