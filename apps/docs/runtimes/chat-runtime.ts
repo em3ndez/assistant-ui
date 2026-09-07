@@ -48,6 +48,41 @@ export const followUpSuggestionAdapter = createSuggestionAdapter({
   },
 });
 
+let claim: { key: string; request: Promise<number | null> } | null = null;
+
+// A docs page mounts several surfaces, each running its own useDocsCloud, and
+// they mount and unmount at different times as the visitor navigates. Cloud
+// moves the anonymous threads on the first POST and reports moved: 0 to every
+// later one, which would leave those surfaces with a stale thread list, so the
+// claim is made once per signed-in visitor and every caller reads its result.
+const claimAnonymousThreads = (baseUrl: string, userKey: string) => {
+  if (claim?.key === userKey) return claim.request;
+
+  const refreshToken = readAnonymousRefreshToken(baseUrl);
+  if (!refreshToken) return null;
+
+  const request: Promise<number | null> = fetch("/api/demo/claim", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ refresh_token: refreshToken }),
+    credentials: "same-origin",
+  })
+    .then(async (response) => {
+      if (!response.ok) return null;
+      const payload = (await response.json()) as { moved?: unknown };
+      refreshDemoUsage();
+      return typeof payload.moved === "number" ? payload.moved : 0;
+    })
+    .catch(() => null);
+
+  claim = { key: userKey, request };
+  void request.then((moved) => {
+    if (moved === null && claim?.request === request) claim = null;
+  });
+
+  return request;
+};
+
 export function useDocsCloud() {
   const session = useSession();
   const accountOwned = session.status === "signed-in" && session.cloudHistory;
@@ -58,27 +93,15 @@ export function useDocsCloud() {
 
   useEffect(() => {
     if (userKey === null || claimedFor === userKey) return;
-    const refreshToken = readAnonymousRefreshToken(baseUrl);
-    if (!refreshToken) return;
+    const request = claimAnonymousThreads(baseUrl, userKey);
+    if (!request) return;
 
     let cancelled = false;
-    void fetch("/api/demo/claim", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ refresh_token: refreshToken }),
-      credentials: "same-origin",
-    })
-      .then(async (response) => {
-        if (!response.ok) return;
-        const payload = (await response.json()) as { moved?: unknown };
-        if (cancelled) return;
-        setClaimedFor(userKey);
-        refreshDemoUsage();
-        if (typeof payload.moved === "number" && payload.moved > 0) {
-          setClaims((count) => count + 1);
-        }
-      })
-      .catch(() => {});
+    void request.then((moved) => {
+      if (cancelled || moved === null) return;
+      setClaimedFor(userKey);
+      if (moved > 0) setClaims((count) => count + 1);
+    });
 
     return () => {
       cancelled = true;
