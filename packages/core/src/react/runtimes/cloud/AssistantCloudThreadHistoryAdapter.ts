@@ -13,6 +13,7 @@ import {
   CloudMessagePersistence,
   createFormattedPersistence,
   createRunTelemetryToolCall,
+  extractRunTelemetryModelId,
   normalizeRunTelemetryUsage,
   type RunTelemetryUsageInit,
   truncateRunTelemetryText,
@@ -475,11 +476,9 @@ export function extractAuiV0<T>(content: T): TelemetryData | null {
     (statusType && AUI_STATUS_MAP[statusType]) || "completed";
 
   const metadata = msg.metadata?.custom as Record<string, unknown> | undefined;
-  const modelId =
-    msg.metadata?.modelId ??
-    (typeof msg.metadata?.custom?.modelId === "string"
-      ? msg.metadata.custom.modelId
-      : undefined);
+  const modelId = extractRunTelemetryModelId(
+    msg.metadata as Record<string, unknown> | undefined,
+  );
 
   const telemetrySteps: TelemetryStepData[] | undefined =
     steps && steps.length > 1
@@ -593,16 +592,6 @@ function collectAiSdkV6Parts(parts: readonly AiSdkV6Part[]): {
   return { textParts, toolCalls, stepsData };
 }
 
-function extractModelId(
-  metadata?: Record<string, unknown>,
-): string | undefined {
-  if (!metadata) return undefined;
-  if (typeof metadata.modelId === "string") return metadata.modelId;
-  const custom = metadata.custom as Record<string, unknown> | undefined;
-  if (typeof custom?.modelId === "string") return custom.modelId;
-  return undefined;
-}
-
 function buildAiSdkV6Result(
   textParts: string[],
   toolCalls: AssistantCloudRunReportToolCall[],
@@ -620,7 +609,7 @@ function buildAiSdkV6Result(
   const outputText = hasText
     ? truncateRunTelemetryText(textParts.join(""))
     : undefined;
-  const modelId = extractModelId(metadata);
+  const modelId = extractRunTelemetryModelId(metadata);
 
   const steps: TelemetryStepData[] | undefined =
     stepsData && stepsData.length > 1
