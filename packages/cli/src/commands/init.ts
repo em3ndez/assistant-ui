@@ -1,46 +1,32 @@
 import { Command, Option } from "commander";
-import { spawn } from "cross-spawn";
 import fs from "node:fs";
 import path from "node:path";
+import { dlxCommand, resolvePackageManager } from "../lib/create-project";
+import { runSpawn, SpawnExitError, SpawnSignalError } from "../lib/run-spawn";
 import { logger } from "../lib/utils/logger";
+import { resolvePackageManagerForCwd } from "../lib/utils/package-manager";
+import {
+  getComponentsJsonStyle,
+  resolveQuickStartRegistryUrl,
+} from "../lib/utils/registry";
 import { create } from "./create";
 
-const DEFAULT_REGISTRY_URL =
-  "https://r.assistant-ui.com/chat/b/ai-sdk-quick-start/json";
-
-class SpawnExitError extends Error {
-  code: number;
-
-  constructor(code: number) {
-    super(`Process exited with code ${code}`);
-    this.code = code;
-  }
-}
-
 interface ExistingProjectInitPlan {
-  initArgs: string[] | null;
+  initArgs: string[];
   addArgs: string[];
 }
 
 export function createExistingProjectInitPlan(params: {
   yes: boolean;
   overwrite: boolean;
-  registryUrl: string;
 }): ExistingProjectInitPlan {
-  const { yes, overwrite, registryUrl } = params;
-
-  if (!yes) {
-    const addArgs = [`shadcn@latest`, "add"];
-    if (overwrite) addArgs.push("--overwrite");
-    addArgs.push(registryUrl);
-    return { initArgs: null, addArgs };
-  }
-
-  const initArgs = [`shadcn@latest`, "init", "--defaults", "--yes"];
-
-  const addArgs = [`shadcn@latest`, "add", "--yes"];
+  const { yes, overwrite } = params;
+  const initArgs = yes
+    ? [`shadcn@latest`, "init", "--defaults", "--yes"]
+    : [`shadcn@latest`, "init"];
+  const addArgs = [`shadcn@latest`, "add"];
+  if (yes) addArgs.push("--yes");
   if (overwrite) addArgs.push("--overwrite");
-  addArgs.push(registryUrl);
 
   return { initArgs, addArgs };
 }
@@ -49,31 +35,6 @@ export function isNonInteractiveShell(
   stdinIsTTY = process.stdin.isTTY,
 ): boolean {
   return !stdinIsTTY;
-}
-
-async function runSpawn(
-  command: string,
-  args: string[],
-  cwd: string,
-): Promise<void> {
-  return new Promise((resolve, reject) => {
-    const child = spawn(command, args, {
-      stdio: "inherit",
-      cwd,
-    });
-
-    child.on("error", (error) => {
-      reject(error);
-    });
-
-    child.on("close", (code) => {
-      if (code !== 0) {
-        reject(new SpawnExitError(code || 1));
-      } else {
-        resolve();
-      }
-    });
-  });
 }
 
 export const init = new Command()
@@ -89,8 +50,8 @@ export const init = new Command()
   )
   .addOption(
     new Option(
-      "-p, --preset <url>",
-      "preset URL from playground (forwarded to 'assistant-ui create')",
+      "-p, --preset <name-or-url>",
+      "preset name or URL (forwarded to 'assistant-ui create')",
     ).hideHelp(),
   )
   .option("--use-npm", "explicitly use npm")
@@ -123,7 +84,7 @@ export const init = new Command()
       }
 
       const createArgs: string[] = [];
-      if (projectDirectory) createArgs.push(projectDirectory);
+      if (projectDirectory) createArgs.push(targetDir);
       if (presetUrl) createArgs.push("--preset", presetUrl);
       if (opts.useNpm) createArgs.push("--use-npm");
       if (opts.usePnpm) createArgs.push("--use-pnpm");
@@ -135,7 +96,6 @@ export const init = new Command()
       return;
     }
 
-    const registryUrl = DEFAULT_REGISTRY_URL;
     logger.info("Initializing assistant-ui in existing project...");
     logger.break();
 
@@ -151,21 +111,28 @@ export const init = new Command()
     }
 
     try {
+      const pm = await resolvePackageManagerForCwd(
+        targetDir,
+        resolvePackageManager(opts),
+      );
+      const [dlxCmd, dlxArgs] = dlxCommand(pm);
+
       const { initArgs, addArgs } = createExistingProjectInitPlan({
         yes: opts.yes,
         overwrite: opts.overwrite,
-        registryUrl,
       });
 
-      if (initArgs) {
-        await runSpawn("npx", initArgs, targetDir);
-      }
-      await runSpawn("npx", addArgs, targetDir);
+      await runSpawn(dlxCmd, [...dlxArgs, ...initArgs], targetDir);
+      const registryUrl = resolveQuickStartRegistryUrl(
+        getComponentsJsonStyle(targetDir),
+      );
+      await runSpawn(dlxCmd, [...dlxArgs, ...addArgs, registryUrl], targetDir);
 
       logger.break();
       logger.success("Project initialized successfully!");
       logger.info("You can now add more components with 'assistant-ui add'");
     } catch (error) {
+      if (error instanceof SpawnSignalError) throw error;
       if (error instanceof SpawnExitError) {
         logger.error(`Initialization failed with code ${error.code}`);
         process.exit(error.code);

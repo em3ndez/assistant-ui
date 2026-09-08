@@ -1,64 +1,32 @@
-import {
-  SpeechState,
-  SubmittedFeedback,
-} from "../interfaces/thread-runtime-core";
+import type { SpeechState } from "../interfaces/thread-runtime-core";
 import { symbolInnerMessage } from "../utils/external-store-message";
-import type {
-  MessagePartStatus,
-  RunConfig,
-  ToolCallMessagePartStatus,
-  ThreadMessage,
-  ThreadAssistantMessagePart,
-  ThreadUserMessagePart,
-  Unsubscribe,
-} from "../../types";
+import type { ThreadMessage } from "../../types/message";
+import type { Unsubscribe } from "../../types/unsubscribe";
+import type { MessagePartStatus, RunConfig } from "../../types/message";
+import { toMessagePartStatus } from "../../utils/normalizePartStatus";
 import { getThreadMessageText } from "../../utils/text";
+import { NestedSubscriptionSubject } from "../../subscribable/subscribable";
 import {
-  NestedSubscriptionSubject,
   SKIP_UPDATE,
   ShallowMemoizeSubject,
-} from "../../subscribable";
+} from "../../subscribable/subscribable";
 import {
-  AttachmentRuntime,
-  AttachmentState,
+  type AttachmentRuntime,
+  type AttachmentState,
   MessageAttachmentRuntimeImpl,
 } from "./attachment-runtime";
 import {
-  EditComposerRuntime,
+  type EditComposerRuntime,
   EditComposerRuntimeImpl,
 } from "./composer-runtime";
 import {
-  MessagePartRuntime,
+  type MessagePartRuntime,
   MessagePartRuntimeImpl,
-  MessagePartState,
+  type MessagePartState,
 } from "./message-part-runtime";
-import { MessageRuntimePath } from "./paths";
-import { ThreadRuntimeCoreBinding } from "./thread-runtime";
+import type { MessageRuntimePath } from "./paths";
+import type { ThreadRuntimeCoreBinding } from "./thread-runtime";
 import type { MessageStateBinding } from "./bindings";
-
-const COMPLETE_STATUS: MessagePartStatus = Object.freeze({
-  type: "complete",
-});
-
-export const toMessagePartStatus = (
-  message: ThreadMessage,
-  partIndex: number,
-  part: ThreadUserMessagePart | ThreadAssistantMessagePart,
-): ToolCallMessagePartStatus => {
-  if (message.role !== "assistant") return COMPLETE_STATUS;
-
-  if (part.type === "tool-call") {
-    if (!part.result) {
-      return message.status as ToolCallMessagePartStatus;
-    } else {
-      return COMPLETE_STATUS;
-    }
-  }
-
-  const isLastPart = partIndex === Math.max(0, message.content.length - 1);
-  if (message.status.type === "requires-action") return COMPLETE_STATUS;
-  return isLastPart ? (message.status as MessagePartStatus) : COMPLETE_STATUS;
-};
 
 const getMessagePartState = (
   message: MessageState,
@@ -74,7 +42,7 @@ const getMessagePartState = (
   return Object.freeze({
     ...part,
     ...{ [symbolInnerMessage]: (part as any)[symbolInnerMessage] },
-    status,
+    status: status as MessagePartStatus,
   });
 };
 
@@ -91,10 +59,6 @@ export type MessageState = ThreadMessage & {
    * @deprecated This API is still under active development and might change without notice.
    */
   readonly speech: SpeechState | undefined;
-  /**
-   * @deprecated Use `message.metadata.submittedFeedback` instead. This will be removed in 0.12.0.
-   */
-  readonly submittedFeedback: SubmittedFeedback | undefined;
 };
 
 export type { MessageStateBinding } from "./bindings";
@@ -109,6 +73,7 @@ export type MessageRuntime = {
   readonly composer: EditComposerRuntime;
 
   getState(): MessageState;
+  delete(): void | Promise<void>;
   reload(config?: ReloadConfig): void;
   /**
    * @deprecated This API is still under active development and might change without notice.
@@ -141,15 +106,20 @@ export class MessageRuntimeImpl implements MessageRuntime {
     return this._core.path;
   }
 
+  private _core: MessageStateBinding;
+  private _threadBinding: ThreadRuntimeCoreBinding;
+
   constructor(
-    private _core: MessageStateBinding,
-    private _threadBinding: ThreadRuntimeCoreBinding,
+    _core: MessageStateBinding,
+    _threadBinding: ThreadRuntimeCoreBinding,
   ) {
+    this._core = _core;
+    this._threadBinding = _threadBinding;
     this.composer = new EditComposerRuntimeImpl(
       new NestedSubscriptionSubject({
         path: {
           ...this.path,
-          ref: `${this.path.ref}${this.path.ref}.composer`,
+          ref: `${this.path.ref}.composer`,
           composerSource: "edit",
         },
         getState: this._getEditComposerRuntimeCore,
@@ -163,6 +133,7 @@ export class MessageRuntimeImpl implements MessageRuntime {
 
   protected __internal_bindMethods() {
     this.reload = this.reload.bind(this);
+    this.delete = this.delete.bind(this);
     this.getState = this.getState.bind(this);
     this.subscribe = this.subscribe.bind(this);
     this.getMessagePartByIndex = this.getMessagePartByIndex.bind(this);
@@ -186,6 +157,11 @@ export class MessageRuntimeImpl implements MessageRuntime {
 
   public getState() {
     return this._core.getState();
+  }
+
+  public delete() {
+    const state = this._core.getState();
+    return this._threadBinding.getState().deleteMessage(state.id);
   }
 
   public reload(reloadConfig: ReloadConfig = {}) {
@@ -270,7 +246,7 @@ export class MessageRuntimeImpl implements MessageRuntime {
       new ShallowMemoizeSubject({
         path: {
           ...this.path,
-          ref: `${this.path.ref}${this.path.ref}.content[${idx}]`,
+          ref: `${this.path.ref}.content[${idx}]`,
           messagePartSelector: { type: "index", index: idx },
         },
         getState: () => {
@@ -288,9 +264,7 @@ export class MessageRuntimeImpl implements MessageRuntime {
       new ShallowMemoizeSubject({
         path: {
           ...this.path,
-          ref:
-            this.path.ref +
-            `${this.path.ref}.content[toolCallId=${JSON.stringify(toolCallId)}]`,
+          ref: `${this.path.ref}.content[toolCallId=${JSON.stringify(toolCallId)}]`,
           messagePartSelector: { type: "toolCallId", toolCallId },
         },
         getState: () => {
@@ -314,7 +288,7 @@ export class MessageRuntimeImpl implements MessageRuntime {
       new ShallowMemoizeSubject({
         path: {
           ...this.path,
-          ref: `${this.path.ref}${this.path.ref}.attachments[${idx}]`,
+          ref: `${this.path.ref}.attachments[${idx}]`,
           attachmentSource: "message",
           attachmentSelector: { type: "index", index: idx },
         },

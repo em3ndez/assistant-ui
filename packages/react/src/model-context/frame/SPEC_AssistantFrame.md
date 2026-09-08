@@ -45,8 +45,8 @@ registry.addTool({
 const frameHost = new AssistantFrameHost(iframeWindow);
 
 // Register with assistant runtime
-const runtime = useAssistantRuntime();
-runtime.registerModelContextProvider(frameHost);
+const aui = useAui();
+aui.modelContext().register(frameHost);
 
 // The assistant now has access to tools from the iframe
 ```
@@ -88,7 +88,7 @@ All messages are wrapped with a channel identifier to avoid conflicts with other
 
 #### Security Considerations
 
-1. **Origin Validation**: Both sides can specify `targetOrigin` to restrict message sources
+1. **Origin Validation**: Both sides default to the current page's origin and can specify an exact `targetOrigin` for cross-origin frames; providers share a fail-closed origin policy
 2. **Window Reference**: Host (parent) only accepts messages from the specific iframe window it's connected to
 3. **Message Channel**: Using a unique channel identifier prevents cross-talk with other postMessage users
 

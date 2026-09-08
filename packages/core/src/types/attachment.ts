@@ -13,6 +13,7 @@ export type PendingAttachmentStatus =
   | {
       type: "incomplete";
       reason: "error" | "upload-paused";
+      message?: string;
     };
 
 export type CompleteAttachmentStatus = {
@@ -51,3 +52,12 @@ export type CreateAttachment = {
   contentType?: string;
   content: ThreadUserMessagePart[];
 };
+
+export const isCreateAttachment = (
+  attachment: File | CreateAttachment,
+): attachment is CreateAttachment =>
+  "content" in attachment && !("lastModified" in attachment);
+
+export const isAttachmentComplete = (
+  attachment: Attachment,
+): attachment is CompleteAttachment => attachment.status.type === "complete";

@@ -2,18 +2,20 @@ import { describe, it, expect } from "vitest";
 import { render, screen, act } from "@testing-library/react";
 import { Suspense, startTransition, use, useState } from "react";
 import { resource } from "../../core/resource";
-import { useResource } from "../../react/use-resource";
-import { tapState } from "../../hooks/tap-state";
+import { useResource } from "../../index";
+import { useState as useResourceState } from "../../react-hooks/useState";
 
 const ShouldNeverFallback = () => {
   throw new Error("should never fallback");
 };
 
 describe("Concurrent Mode with useResource", () => {
-  it("should not commit tapState updates when render is discarded", async () => {
-    const TestResource = resource(() => {
-      return tapState(false);
-    });
+  it("should not commit useResourceState updates when render is discarded", async () => {
+    const useTestResource = () => {
+      return useResourceState(false);
+    };
+
+    const TestResource = resource(useTestResource);
 
     let resolve: (value: number) => void;
 
@@ -22,8 +24,8 @@ describe("Concurrent Mode with useResource", () => {
     });
 
     function Suspender() {
-      const result = use(suspendPromise);
-      return result;
+      const value = use(suspendPromise);
+      return value;
     }
 
     function App() {
@@ -32,11 +34,16 @@ describe("Concurrent Mode with useResource", () => {
 
       return (
         <>
-          <button data-testid="hello-btn" onClick={() => setMessage("hello")} />
+          <button
+            type="button"
+            data-testid="hello-btn"
+            onClick={() => setMessage("hello")}
+          />
           <div data-testid="message">{message}</div>
           <div data-testid="load">{load ? "true" : "false"}</div>
 
           <button
+            type="button"
             data-testid="suspend-btn"
             onClick={() => {
               startTransition(() => {
@@ -71,7 +78,7 @@ describe("Concurrent Mode with useResource", () => {
     expect(screen.getByTestId("message").textContent).toBe("hello");
   });
 
-  it("react should not commit tapState updates when render is discarded", async () => {
+  it("react should not commit useResourceState updates when render is discarded", async () => {
     let resolve: (value: number) => void;
 
     const suspendPromise = new Promise<number>((r) => {
@@ -79,8 +86,8 @@ describe("Concurrent Mode with useResource", () => {
     });
 
     function Suspender() {
-      const result = use(suspendPromise);
-      return result;
+      const value = use(suspendPromise);
+      return value;
     }
 
     function App() {
@@ -89,11 +96,16 @@ describe("Concurrent Mode with useResource", () => {
 
       return (
         <>
-          <button data-testid="hello-btn" onClick={() => setMessage("hello")} />
+          <button
+            type="button"
+            data-testid="hello-btn"
+            onClick={() => setMessage("hello")}
+          />
           <div data-testid="message">{message}</div>
           <div data-testid="load">{load ? "true" : "false"}</div>
 
           <button
+            type="button"
             data-testid="suspend-btn"
             onClick={() => {
               startTransition(() => {
@@ -132,18 +144,20 @@ describe("Concurrent Mode with useResource", () => {
     let resolve: () => void;
     let shouldSuspend = false;
 
-    const TestResource = resource((props: { id: number }) => {
+    const useTestResource = (props: { id: number }) => {
       if (shouldSuspend) {
         throw new Promise<void>((r) => {
           resolve = r;
         });
       }
       return { value: `content-${props.id}` };
-    });
+    };
+
+    const TestResource = resource(useTestResource);
 
     function Inner({ id }: { id: number }) {
-      const result = useResource(TestResource({ id }));
-      return <div data-testid="result">{result.value}</div>;
+      const value = useResource(TestResource({ id }));
+      return <div data-testid="result">{value.value}</div>;
     }
 
     function App() {
@@ -151,6 +165,7 @@ describe("Concurrent Mode with useResource", () => {
       return (
         <div>
           <button
+            type="button"
             data-testid="btn"
             onClick={() => {
               shouldSuspend = true;
@@ -189,8 +204,8 @@ describe("Concurrent Mode with useResource", () => {
     });
 
     function Suspender() {
-      const result = use(suspendPromise);
-      return result;
+      const value = use(suspendPromise);
+      return value;
     }
 
     function App() {
@@ -199,11 +214,16 @@ describe("Concurrent Mode with useResource", () => {
 
       return (
         <>
-          <button data-testid="hello-btn" onClick={() => setMessage("hello")} />
+          <button
+            type="button"
+            data-testid="hello-btn"
+            onClick={() => setMessage("hello")}
+          />
           <div data-testid="message">{message}</div>
           <div data-testid="load">{load ? "true" : "false"}</div>
 
           <button
+            type="button"
             data-testid="suspend-btn"
             onClick={() => {
               startTransition(() => {

@@ -1,7 +1,4 @@
-// =============================================================================
-// Internal API — implementation details used by framework bindings
-// Not part of the public API surface.
-// =============================================================================
+// Internal API — implementation details used by framework bindings, not part of the public API surface.
 
 // Binding Types
 export type {
@@ -21,10 +18,7 @@ export { DefaultEditComposerRuntimeCore } from "./base/default-edit-composer-run
 // Runtime Impl Classes
 export { AssistantRuntimeImpl } from "./api/assistant-runtime";
 
-export {
-  getThreadState,
-  ThreadRuntimeImpl,
-} from "./api/thread-runtime";
+export { getThreadState, ThreadRuntimeImpl } from "./api/thread-runtime";
 export type {
   ThreadRuntimeCoreBinding,
   ThreadListItemRuntimeBinding,
@@ -62,3 +56,8 @@ export {
   MessageRepository,
 } from "./utils/message-repository";
 export type { ExportedMessageRepositoryItem } from "./utils/message-repository";
+export { createMessageRepositorySession } from "./utils/message-repository-session";
+export type {
+  MessageRepositorySession,
+  MessageRepositorySessionOptions,
+} from "./utils/message-repository-session";

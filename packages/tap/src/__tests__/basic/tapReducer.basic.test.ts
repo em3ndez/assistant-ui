@@ -1,15 +1,15 @@
 import { describe, it, expect, afterEach } from "vitest";
-import { tapReducer } from "../../hooks/tap-reducer";
-import { tapEffect } from "../../hooks/tap-effect";
+import { useReducer } from "../../react-hooks/useReducer";
+import { useEffect } from "../../react-hooks/useEffect";
 import {
   createTestResource,
   renderTest,
   cleanupAllResources,
   waitForNextTick,
-  getCommittedOutput,
+  getCommittedValue,
 } from "../test-utils";
 
-describe("tapReducer - Basic Functionality", () => {
+describe("useReducer - Basic Functionality", () => {
   afterEach(() => {
     cleanupAllResources();
   });
@@ -19,12 +19,12 @@ describe("tapReducer - Basic Functionality", () => {
       const reducer = (state: number, action: number) => state + action;
 
       const testFiber = createTestResource(() => {
-        const [count] = tapReducer(reducer, 0);
+        const [count] = useReducer(reducer, 0);
         return count;
       });
 
-      const result = renderTest(testFiber, undefined);
-      expect(result).toBe(0);
+      const value = renderTest(testFiber);
+      expect(value).toBe(0);
     });
 
     it("should initialize with init function", () => {
@@ -32,19 +32,19 @@ describe("tapReducer - Basic Functionality", () => {
       const reducer = (state: number, action: number) => state + action;
 
       const testFiber = createTestResource(() => {
-        const [count] = tapReducer(reducer, 10, (arg) => {
+        const [count] = useReducer(reducer, 10, (arg) => {
           initCalled++;
           return arg * 2;
         });
         return count;
       });
 
-      const result = renderTest(testFiber, undefined);
-      expect(result).toBe(20);
+      const value = renderTest(testFiber);
+      expect(value).toBe(20);
       expect(initCalled).toBe(1);
 
       // Re-render should not call init again
-      renderTest(testFiber, undefined);
+      renderTest(testFiber);
       expect(initCalled).toBe(1);
     });
   });
@@ -64,34 +64,36 @@ describe("tapReducer - Basic Functionality", () => {
       let dispatchFn: ((action: Action) => void) | null = null;
 
       const testFiber = createTestResource(() => {
-        const [count, dispatch] = tapReducer(reducer, 0);
+        const [count, dispatch] = useReducer(reducer, 0);
 
-        tapEffect(() => {
+        useEffect(() => {
           dispatchFn = dispatch;
         });
 
         return count;
       });
 
-      renderTest(testFiber, undefined);
-      expect(getCommittedOutput(testFiber)).toBe(0);
+      renderTest(testFiber);
+      expect(getCommittedValue(testFiber)).toBe(0);
 
       dispatchFn!({ type: "increment" });
       await waitForNextTick();
-      expect(getCommittedOutput(testFiber)).toBe(1);
+      expect(getCommittedValue(testFiber)).toBe(1);
 
       dispatchFn!({ type: "increment" });
       await waitForNextTick();
-      expect(getCommittedOutput(testFiber)).toBe(2);
+      expect(getCommittedValue(testFiber)).toBe(2);
 
       dispatchFn!({ type: "decrement" });
       await waitForNextTick();
-      expect(getCommittedOutput(testFiber)).toBe(1);
+      expect(getCommittedValue(testFiber)).toBe(1);
     });
   });
 
   describe("Same-state bailout", () => {
-    it("should not re-render when reducer returns same state (Object.is)", async () => {
+    it("re-renders once when the reducer returns the same state, like React", async () => {
+      // React computes user reducers during render (no eager dispatch-time
+      // bailout), so a same-state dispatch still renders once.
       let renderCount = 0;
       const reducer = (state: number, action: number) =>
         action === 0 ? state : state + action;
@@ -100,22 +102,22 @@ describe("tapReducer - Basic Functionality", () => {
 
       const testFiber = createTestResource(() => {
         renderCount++;
-        const [count, dispatch] = tapReducer(reducer, 42);
+        const [count, dispatch] = useReducer(reducer, 42);
 
-        tapEffect(() => {
+        useEffect(() => {
           dispatchFn = dispatch;
         });
 
         return count;
       });
 
-      renderTest(testFiber, undefined);
+      renderTest(testFiber);
       expect(renderCount).toBe(1);
 
       // Dispatch action that returns same state
       dispatchFn!(0);
       await waitForNextTick();
-      expect(renderCount).toBe(1);
+      expect(renderCount).toBe(2);
     });
   });
 
@@ -127,29 +129,29 @@ describe("tapReducer - Basic Functionality", () => {
       const testFiber = createTestResource(() => {
         const reducer = (state: number, action: number) =>
           state + action * multiplier;
-        const [count, dispatch] = tapReducer(reducer, 0);
+        const [count, dispatch] = useReducer(reducer, 0);
 
-        tapEffect(() => {
+        useEffect(() => {
           dispatchFn = dispatch;
         });
 
         return count;
       });
 
-      renderTest(testFiber, undefined);
-      expect(getCommittedOutput(testFiber)).toBe(0);
+      renderTest(testFiber);
+      expect(getCommittedValue(testFiber)).toBe(0);
 
       // Dispatch with multiplier=1
       dispatchFn!(5);
       await waitForNextTick();
-      expect(getCommittedOutput(testFiber)).toBe(5);
+      expect(getCommittedValue(testFiber)).toBe(5);
 
       // Change multiplier and dispatch
       multiplier = 10;
-      renderTest(testFiber, undefined); // re-render to update reducer
+      renderTest(testFiber); // re-render to update reducer
       dispatchFn!(5);
       await waitForNextTick();
-      expect(getCommittedOutput(testFiber)).toBe(55); // 5 + 5*10
+      expect(getCommittedValue(testFiber)).toBe(55); // 5 + 5*10
     });
   });
 
@@ -159,24 +161,24 @@ describe("tapReducer - Basic Functionality", () => {
       let dispatchFn: ((action: number) => void) | null = null;
 
       const testFiber = createTestResource(() => {
-        const [count, dispatch] = tapReducer(reducer, 0);
+        const [count, dispatch] = useReducer(reducer, 0);
 
-        tapEffect(() => {
+        useEffect(() => {
           dispatchFn = dispatch;
         });
 
         return count;
       });
 
-      renderTest(testFiber, undefined);
-      expect(getCommittedOutput(testFiber)).toBe(0);
+      renderTest(testFiber);
+      expect(getCommittedValue(testFiber)).toBe(0);
 
       // Multiple dispatches
       dispatchFn!(1);
       dispatchFn!(2);
       dispatchFn!(3);
       await waitForNextTick();
-      expect(getCommittedOutput(testFiber)).toBe(6);
+      expect(getCommittedValue(testFiber)).toBe(6);
     });
   });
 
@@ -186,13 +188,13 @@ describe("tapReducer - Basic Functionality", () => {
       const dispatches: ((action: number) => void)[] = [];
 
       const testFiber = createTestResource(() => {
-        const [count, dispatch] = tapReducer(reducer, 0);
+        const [count, dispatch] = useReducer(reducer, 0);
         dispatches.push(dispatch);
         return count;
       });
 
-      renderTest(testFiber, undefined);
-      renderTest(testFiber, undefined);
+      renderTest(testFiber);
+      renderTest(testFiber);
 
       expect(dispatches[0]).toBe(dispatches[1]);
     });

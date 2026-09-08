@@ -1,17 +1,16 @@
 "use client";
 
 import {
-  ActionButtonElement,
-  ActionButtonProps,
+  type ActionButtonElement,
+  type ActionButtonProps,
   createActionButton,
 } from "../../utils/createActionButton";
-import { useCallback } from "react";
-import { useAuiState, useAui } from "@assistant-ui/store";
+import { useSuggestionTrigger as useSuggestionTriggerBehavior } from "@assistant-ui/core/react";
 
 const useThreadSuggestion = ({
   prompt,
   send,
-  clearComposer = true,
+  clearComposer,
   autoSend,
   method: _method,
 }: {
@@ -25,7 +24,8 @@ const useThreadSuggestion = ({
   send?: boolean | undefined;
 
   /**
-   * Whether to clear the composer after sending.
+   * Whether to clear the composer after sending. A send queued while a run is
+   * in progress never clears the composer.
    * When send is set to false, determines if composer text is replaced with suggestion (true, default),
    * or if it's appended to the composer text (false).
    *
@@ -39,38 +39,15 @@ const useThreadSuggestion = ({
   /** @deprecated Use `clearComposer` instead. */
   method?: "replace";
 }) => {
-  const aui = useAui();
-  const disabled = useAuiState((s) => s.thread.isDisabled);
-
-  // ========== Deprecation Mapping ==========
   const resolvedSend = send ?? autoSend ?? false;
-  // ==========================================
 
-  const callback = useCallback(() => {
-    const isRunning = aui.thread().getState().isRunning;
-
-    if (resolvedSend && !isRunning) {
-      aui.thread().append({
-        content: [{ type: "text", text: prompt }],
-        runConfig: aui.composer().getState().runConfig,
-      });
-      if (clearComposer) {
-        aui.composer().setText("");
-      }
-    } else {
-      if (clearComposer) {
-        aui.composer().setText(prompt);
-      } else {
-        const currentText = aui.composer().getState().text;
-        aui
-          .composer()
-          .setText(currentText.trim() ? `${currentText} ${prompt}` : prompt);
-      }
-    }
-  }, [aui, resolvedSend, clearComposer, prompt]);
-
+  const { disabled, trigger } = useSuggestionTriggerBehavior({
+    prompt,
+    send: resolvedSend,
+    clearComposer,
+  });
   if (disabled) return null;
-  return callback;
+  return trigger;
 };
 
 export namespace ThreadPrimitiveSuggestion {

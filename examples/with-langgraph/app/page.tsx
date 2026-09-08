@@ -1,13 +1,20 @@
 "use client";
 
-import { Thread } from "@/components/assistant-ui/thread";
-import { PriceSnapshotTool } from "@/components/tools/price-snapshot/PriceSnapshotTool";
-import { PurchaseStockTool } from "@/components/tools/purchase-stock/PurchaseStockTool";
-import { ThreadList } from "@/components/assistant-ui/thread-list";
-import { useAui, AuiProvider, Suggestions } from "@assistant-ui/react";
+import { Thread } from "@/components/assistant-ui/elements/thread.aui";
+import { ThreadList } from "@/components/assistant-ui/elements/thread-list.aui";
+import {
+  useAui,
+  AuiProvider,
+  AuiConfig,
+  Suggestions,
+  Tools,
+} from "@assistant-ui/react";
+import toolkit from "./toolkit";
 
 function ThreadWithSuggestions() {
-  const aui = useAui({
+  const aui = useAui();
+  const config = AuiConfig({
+    tools: Tools({ toolkit }),
     suggestions: Suggestions([
       {
         title: "Check stock price",
@@ -22,7 +29,7 @@ function ThreadWithSuggestions() {
     ]),
   });
   return (
-    <AuiProvider value={aui}>
+    <AuiProvider extends={aui} config={config}>
       <Thread />
     </AuiProvider>
   );
@@ -36,8 +43,6 @@ export default function Home() {
       </div>
       <div className="flex-grow">
         <ThreadWithSuggestions />
-        <PriceSnapshotTool />
-        <PurchaseStockTool />
       </div>
     </div>
   );

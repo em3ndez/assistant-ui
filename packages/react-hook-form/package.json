@@ -1,6 +1,6 @@
 {
   "name": "@assistant-ui/react-hook-form",
-  "version": "0.12.5",
+  "version": "0.12.31",
   "description": "React Hook Form integration for assistant-ui",
   "keywords": [
     "react-hook-form",
@@ -16,7 +16,6 @@
   "type": "module",
   "exports": {
     ".": {
-      "aui-source": "./src/index.ts",
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
     }
@@ -30,13 +29,16 @@
   ],
   "sideEffects": false,
   "scripts": {
-    "build": "aui-build"
+    "build": "aui-build",
+    "test": "vitest run",
+    "test:watch": "vitest"
   },
   "dependencies": {
-    "zod": "^4.3.6"
+    "@assistant-ui/core": "^0.3.17",
+    "@assistant-ui/store": "^0.3.12",
+    "zod": "^4.5.4"
   },
   "peerDependencies": {
-    "@assistant-ui/react": "^0.12.14",
     "@types/react": "*",
     "react": "^18 || ^19",
     "react-hook-form": "^7"
@@ -47,11 +49,14 @@
     }
   },
   "devDependencies": {
-    "@assistant-ui/react": "workspace:*",
     "@assistant-ui/x-buildutils": "workspace:*",
-    "@types/react": "^19.2.14",
-    "react": "^19.2.4",
-    "react-hook-form": "^7.71.2"
+    "@testing-library/react": "^16.3.3",
+    "@types/react": "^19.2.18",
+    "@types/react-dom": "^19.2.7",
+    "jsdom": "^30.0.1",
+    "react": "^19.2.8",
+    "react-hook-form": "^7.87.0",
+    "vitest": "^4.1.11"
   },
   "publishConfig": {
     "access": "public",

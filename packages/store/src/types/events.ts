@@ -1,14 +1,8 @@
-import type {
-  AssistantClientAccessor,
-  ClientEvents,
-  ClientNames,
-} from "./client";
+import type { ClientEvents, ClientMeta, ClientNames } from "./client";
 
 // --- Event Map Construction ---
 type UnionToIntersection<U> = (
-  U extends unknown
-    ? (x: U) => void
-    : never
+  U extends unknown ? (x: U) => void : never
 ) extends (x: infer I) => void
   ? I
   : never;
@@ -33,7 +27,7 @@ type EventSource<T extends AssistantEventName> =
 // --- Scoping ---
 
 type ParentOf<K extends ClientNames> =
-  AssistantClientAccessor<K> extends { source: infer S }
+  ClientMeta<K> extends { source: infer S }
     ? S extends ClientNames
       ? S
       : never

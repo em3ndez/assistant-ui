@@ -1,12 +1,13 @@
 "use client";
 
 import {
-  ActionButtonElement,
-  ActionButtonProps,
+  type ActionButtonElement,
+  type ActionButtonProps,
   createActionButton,
 } from "../../utils/createActionButton";
 import { useCallback } from "react";
-import { useAuiState, useAui } from "@assistant-ui/store";
+import { useAui } from "@assistant-ui/store";
+import { useComposerAddAttachment as useComposerAddAttachmentBehavior } from "@assistant-ui/core/react";
 
 const useComposerAddAttachment = ({
   multiple = true,
@@ -14,7 +15,7 @@ const useComposerAddAttachment = ({
   /** allow selecting multiple files */
   multiple?: boolean | undefined;
 } = {}) => {
-  const disabled = useAuiState((s) => !s.composer.isEditing);
+  const { disabled, addAttachment } = useComposerAddAttachmentBehavior();
   const aui = useAui();
 
   const callback = useCallback(() => {
@@ -23,21 +24,27 @@ const useComposerAddAttachment = ({
     input.multiple = multiple;
     input.hidden = true;
 
-    const attachmentAccept = aui.composer().getState().attachmentAccept;
+    const attachmentAccept = aui.composer.getState().attachmentAccept;
     if (attachmentAccept !== "*") {
       input.accept = attachmentAccept;
     }
 
     document.body.appendChild(input);
 
-    input.onchange = (e) => {
+    input.onchange = async (e) => {
       const fileList = (e.target as HTMLInputElement).files;
       if (!fileList) return;
-      for (const file of fileList) {
-        aui.composer().addAttachment(file);
-      }
+
+      const attachmentPromises = Array.from(fileList, async (file) => {
+        try {
+          await addAttachment(file);
+        } catch {
+          // The composer runtime emits composer.attachmentAddError before rejecting.
+        }
+      });
 
       document.body.removeChild(input);
+      await Promise.all(attachmentPromises);
     };
 
     input.oncancel = () => {
@@ -47,7 +54,7 @@ const useComposerAddAttachment = ({
     };
 
     input.click();
-  }, [aui, multiple]);
+  }, [aui, multiple, addAttachment]);
 
   if (disabled) return null;
   return callback;

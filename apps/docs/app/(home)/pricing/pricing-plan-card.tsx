@@ -1,25 +1,14 @@
 "use client";
 
-import Link from "next/link";
 import { Check } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { typeEyebrow } from "@/components/shared/type";
+import { Button } from "@/components/ui/button";
 import { analytics } from "@/lib/analytics";
-
-interface PricingPlan {
-  name: string;
-  price: string;
-  period?: string;
-  description: string;
-  features: string[];
-  cta: string;
-  href: string;
-  highlighted: boolean;
-}
+import type { PricingPlan } from "./pricing-data";
 
 export function PricingPlanCard({ plan }: { plan: PricingPlan }) {
   const handleClick = () => {
-    // Track pricing plan clicks with plan name for attribution
-    // Sanitize plan.name to prevent analytics pollution if component is reused with dynamic data
     const safePlanName = plan.name.toLowerCase().replace(/[^a-z0-9_]/g, "_");
     if (plan.name === "Enterprise") {
       analytics.cta.clicked("contact_sales", "pricing");
@@ -31,47 +20,52 @@ export function PricingPlanCard({ plan }: { plan: PricingPlan }) {
   return (
     <div
       className={cn(
-        "relative flex flex-col rounded-lg border p-6",
-        plan.highlighted ? "border-foreground/20 bg-muted/30" : "border-border",
+        "rounded-document relative flex flex-col border-t pt-6",
+        plan.highlighted ? "border-foreground" : "border-foreground/10",
       )}
     >
-      <div className="mb-6">
-        <h3 className="font-medium text-sm">{plan.name}</h3>
-        <div className="mt-2 flex items-baseline gap-1">
-          <span className="font-medium text-2xl tracking-tight">
+      <div className="mb-8">
+        <h3 className={typeEyebrow}>{plan.name}</h3>
+        <div className="mt-4 flex items-baseline gap-1">
+          <span className="font-display text-4xl font-[550] tracking-[-0.01em] tabular-nums">
             {plan.price}
           </span>
           {plan.period && (
             <span className="text-muted-foreground text-sm">{plan.period}</span>
           )}
         </div>
-        <p className="mt-1 text-muted-foreground text-sm">{plan.description}</p>
+        <p className="text-muted-foreground mt-2 text-sm leading-relaxed text-pretty">
+          {plan.description}
+        </p>
       </div>
 
-      <ul className="mb-6 flex-1 space-y-2.5">
+      <ul className="mb-8 flex flex-1 flex-col gap-2.5">
         {plan.features.map((feature) => (
           <li
             key={feature}
-            className="flex items-start gap-2 text-muted-foreground text-sm"
+            className="text-muted-foreground flex items-start gap-2 text-sm leading-relaxed"
           >
-            <Check className="mt-0.5 h-4 w-4 flex-shrink-0 text-foreground/60" />
+            <Check className="text-foreground/50 mt-0.5 size-4 shrink-0" />
             <span>{feature}</span>
           </li>
         ))}
       </ul>
 
-      <Link
-        href={plan.href}
-        onClick={handleClick}
-        className={cn(
-          "block rounded-md py-2 text-center font-medium text-sm transition-colors",
-          plan.highlighted
-            ? "bg-foreground text-background hover:bg-foreground/90"
-            : "border border-border hover:bg-muted",
-        )}
+      <Button
+        nativeButton={false}
+        variant={plan.highlighted ? "default" : "outline"}
+        className="w-full"
+        render={
+          <a
+            href={plan.href}
+            target="_blank"
+            rel="noopener noreferrer"
+            onClick={handleClick}
+          />
+        }
       >
         {plan.cta}
-      </Link>
+      </Button>
     </div>
   );
 }

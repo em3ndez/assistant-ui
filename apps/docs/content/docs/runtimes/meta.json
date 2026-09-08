@@ -1,18 +1,21 @@
 {
   "title": "Runtimes",
-  "description": "Backend integrations",
+  "description": "Runtime adapters and backend connection guides for wiring assistant-ui to AI backends, protocols, and framework-specific streaming APIs.",
   "icon": "Server",
   "root": true,
   "pages": [
     "pick-a-runtime",
+    "concepts",
+    "custom",
     "ai-sdk",
-    "data-stream",
-    "mastra",
+    "eve",
     "langgraph",
-    "langserve",
-    "external-store",
-    "custom-rest",
-    "helicone",
+    "langchain",
+    "google-adk",
+    "a2a",
+    "ag-ui",
+    "opencode",
+    "claude-managed-agents",
     "..."
   ]
 }

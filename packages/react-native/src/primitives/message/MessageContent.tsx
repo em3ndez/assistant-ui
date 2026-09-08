@@ -3,16 +3,16 @@ import { Text } from "react-native";
 import type {
   ThreadUserMessagePart,
   ThreadAssistantMessagePart,
-  ToolCallMessagePart,
-  DataMessagePart,
+  MessagePartState,
 } from "@assistant-ui/core";
 import { useAui, useAuiState } from "@assistant-ui/store";
 import type {
   ToolCallMessagePartProps,
   DataMessagePartProps,
-} from "../../types";
+} from "@assistant-ui/core/react";
 
 type MessageContentPart = ThreadUserMessagePart | ThreadAssistantMessagePart;
+type MessageContentStatePart = MessagePartState;
 
 export type MessageContentProps = {
   renderText?: (props: {
@@ -59,22 +59,20 @@ const ToolUIDisplay = ({
   index,
 }: {
   Fallback:
-    | ((props: { part: ToolCallMessagePart; index: number }) => ReactElement)
+    | ((props: {
+        part: Extract<MessageContentPart, { type: "tool-call" }>;
+        index: number;
+      }) => ReactElement)
     | undefined;
-  part: ToolCallMessagePart;
+  part: Extract<MessageContentStatePart, { type: "tool-call" }>;
   index: number;
 }) => {
   const aui = useAui();
-  const Render = useAuiState((s) => {
-    const renders = s.tools.tools[part.toolName];
-    if (Array.isArray(renders)) return renders[0];
-    return renders;
-  });
-
-  const partMethods = useMemo(
-    () => aui.message().part({ index }),
-    [aui, index],
+  const Render = useAuiState(
+    (s) => s.tools.toolUIs[part.toolName]?.[0]?.render,
   );
+
+  const partMethods = useMemo(() => aui.message.part({ index }), [aui, index]);
 
   if (Render) {
     return (
@@ -82,6 +80,7 @@ const ToolUIDisplay = ({
         {...(part as ToolCallMessagePartProps)}
         addResult={partMethods.addToolResult}
         resume={partMethods.resumeToolCall}
+        respondToApproval={partMethods.respondToToolApproval}
       />
     );
   }
@@ -95,9 +94,12 @@ const DataUIDisplay = ({
   index,
 }: {
   Fallback:
-    | ((props: { part: DataMessagePart; index: number }) => ReactElement)
+    | ((props: {
+        part: Extract<MessageContentPart, { type: "data" }>;
+        index: number;
+      }) => ReactElement)
     | undefined;
-  part: DataMessagePart;
+  part: Extract<MessageContentStatePart, { type: "data" }>;
   index: number;
 }) => {
   const Render = useAuiState((s) => {
@@ -119,7 +121,7 @@ export const MessageContent = ({
   renderFile,
   renderData,
 }: MessageContentProps) => {
-  const content = useAuiState((s) => s.message.content);
+  const content = useAuiState((s) => s.message.parts);
 
   return (
     <>

@@ -81,47 +81,44 @@ type PurchaseStockResult = {
 };
 ```
 
-Then we use `makeAssistantToolUI` to define the tool UI:
+Then we define a tool UI renderer:
 
 ```tsx title="@/components/tools/purchase-stock/PurchaseStockTool.tsx"
 "use client";
 
 import { TransactionConfirmationPending } from "./transaction-confirmation-pending";
 import { TransactionConfirmationFinal } from "./transaction-confirmation-final";
-import { makeAssistantToolUI } from "@assistant-ui/react";
-import { updateState } from "@/lib/chatApi";
+import type { ToolCallMessagePartComponent } from "@assistant-ui/react";
 
-export const PurchaseStockTool = makeAssistantToolUI<PurchaseStockArgs, string>(
-  {
-    toolName: "purchase_stock",
-    render: function PurchaseStockUI({ args, result, status, addResult }) {
-      const handleReject = async () => {
-        addResult({ approve: false });
-      };
+export const PurchaseStockToolUI: ToolCallMessagePartComponent<
+  PurchaseStockArgs,
+  string
+> = function PurchaseStockUI({ args, result, status, addResult }) {
+  const handleReject = async () => {
+    addResult(JSON.stringify({ approve: false }));
+  };
 
-      const handleConfirm = async () => {
-        addResult({ approve: true });
-      };
+  const handleConfirm = async () => {
+    addResult(JSON.stringify({ approve: true }));
+  };
 
-      return (
-        <div className="mb-4 flex flex-col items-center gap-2">
-          <div>
-            <pre className="whitespace-pre-wrap break-all text-center">
-              purchase_stock({JSON.stringify(args)})
-            </pre>
-          </div>
-          {!result && status.type !== "running" && (
-            <TransactionConfirmationPending
-              {...args}
-              onConfirm={handleConfirm}
-              onReject={handleReject}
-            />
-          )}
-        </div>
-      );
-    },
-  },
-);
+  return (
+    <div className="mb-4 flex flex-col items-center gap-2">
+      <div>
+        <pre className="whitespace-pre-wrap break-all text-center">
+          purchase_stock({JSON.stringify(args)})
+        </pre>
+      </div>
+      {!result && status.type !== "running" && (
+        <TransactionConfirmationPending
+          {...args}
+          onConfirm={handleConfirm}
+          onReject={handleReject}
+        />
+      )}
+    </div>
+  );
+};
 ```
 
 Finally, we add a `TransactionConfirmationPending` component to ask for approval.
@@ -209,17 +206,32 @@ export function TransactionConfirmationPending(props: TransactionConfirmation) {
 
 ### Bind approval UI
 
-```tsx title="@/app/page.tsx" {1,8}
-import { PurchaseStockTool } from "@/components/tools/purchase-stock/PurchaseStockTool";
+```tsx title="@/app/page.tsx" {1-5,12}
+"use client";
+
+import { Thread } from "@/components/assistant-ui/elements/thread.aui";
+import { PriceSnapshotToolUI } from "@/components/tools/price-snapshot/PriceSnapshotTool";
+import { PurchaseStockToolUI } from "@/components/tools/purchase-stock/PurchaseStockTool";
+import { AuiConfig, AuiProvider, defineToolkit, Tools, useAui } from "@assistant-ui/react";
+
+const toolkit = defineToolkit({
+  price_snapshot: {
+    type: "backend",
+    render: PriceSnapshotToolUI,
+  },
+  purchase_stock: {
+    type: "backend",
+    render: PurchaseStockToolUI,
+  },
+});
 
 export default function Home() {
+  const aui = useAui();
+  const config = AuiConfig({ tools: Tools({ toolkit }) });
   return (
-    <div className="flex h-full flex-col">
-      <Thread
-        ...
-        tools={[PriceSnapshotTool, PurchaseStockTool]}
-      />
-    </div>
+    <AuiProvider extends={aui} config={config}>
+      <Thread />
+    </AuiProvider>
   );
 }
 ```
@@ -307,8 +319,7 @@ We will import the new `<TransactionConfirmationFinal />` component and use it i
 
 import { TransactionConfirmationPending } from "./transaction-confirmation-pending";
 import { TransactionConfirmationFinal } from "./transaction-confirmation-final";
-import { makeAssistantToolUI } from "@assistant-ui/react";
-import { updateState } from "@/lib/chatApi";
+import type { ToolCallMessagePartComponent } from "@assistant-ui/react";
 
 type PurchaseStockArgs = {
   ticker: string;
@@ -323,56 +334,54 @@ type PurchaseStockResult = {
   error?: string;
 };
 
-export const PurchaseStockTool = makeAssistantToolUI<PurchaseStockArgs, string>(
-  {
-    toolName: "purchase_stock",
-    render: function PurchaseStockUI({ args, result, status, addResult }) {
-      let resultObj: PurchaseStockResult;
-      try {
-        resultObj = result ? JSON.parse(result) : {};
-      } catch (e) {
-        resultObj = { error: result! };
-      }
+export const PurchaseStockToolUI: ToolCallMessagePartComponent<
+  PurchaseStockArgs,
+  string
+> = function PurchaseStockUI({ args, result, status, addResult }) {
+  let resultObj: PurchaseStockResult;
+  try {
+    resultObj = result ? JSON.parse(result) : {};
+  } catch (e) {
+    resultObj = { error: result! };
+  }
 
-      const handleReject = () => {
-        addResult({ cancelled: true });
-      };
+  const handleReject = () => {
+    addResult(JSON.stringify({ approve: false }));
+  };
 
-      const handleConfirm = async () => {
-        addResult({ approve: true });
-      };
+  const handleConfirm = async () => {
+    addResult(JSON.stringify({ approve: true }));
+  };
 
-      return (
-        <div className="mb-4 flex flex-col items-center gap-2">
-          <div>
-            <pre className="whitespace-pre-wrap break-all text-center">
-              purchase_stock({JSON.stringify(args)})
-            </pre>
-          </div>
-          {!result && status.type !== "running" && (
-            <TransactionConfirmationPending
-              {...args}
-              onConfirm={handleConfirm}
-              onReject={handleReject}
-            />
-          )}
-          {resultObj.approve && <TransactionConfirmationFinal {...args} />}
-          {resultObj.approve === false && (
-            <pre className="font-bold text-red-600">User rejected purchase</pre>
-          )}
-          {resultObj.cancelled && (
-            <pre className="font-bold text-red-600">Cancelled</pre>
-          )}
-        </div>
-      );
-    },
-  },
-);
+  return (
+    <div className="mb-4 flex flex-col items-center gap-2">
+      <div>
+        <pre className="whitespace-pre-wrap break-all text-center">
+          purchase_stock({JSON.stringify(args)})
+        </pre>
+      </div>
+      {!result && status.type !== "running" && (
+        <TransactionConfirmationPending
+          {...args}
+          onConfirm={handleConfirm}
+          onReject={handleReject}
+        />
+      )}
+      {resultObj.approve && <TransactionConfirmationFinal {...args} />}
+      {resultObj.approve === false && (
+        <pre className="font-bold text-red-600">User rejected purchase</pre>
+      )}
+      {resultObj.cancelled && (
+        <pre className="font-bold text-red-600">Cancelled</pre>
+      )}
+    </div>
+  );
+};
 ```
 
 ### Try it out!
 
-Confirm the purchase of shares. You should see the approval confimration UI appear.
+Confirm the purchase of shares. You should see the approval confirmation UI appear.
 
 import purchase2 from "./images/acme-confirmed.png";
 

@@ -1,16 +1,16 @@
 "use client";
 
 import {
-  ComponentType,
+  type ComponentType,
   createContext,
-  FC,
+  type FC,
   forwardRef,
-  PropsWithChildren,
+  type PropsWithChildren,
   useContext,
   useState,
 } from "react";
-import { ReadonlyStore } from "../../context/ReadonlyStore";
-import { create, UseBoundStore } from "zustand";
+import type { ReadonlyStore } from "../../context/ReadonlyStore";
+import { create, type UseBoundStore } from "zustand";
 import type {
   MessagePartStatus,
   ToolCallMessagePartStatus,
@@ -38,7 +38,7 @@ export const SmoothContextProvider: FC<PropsWithChildren> = ({ children }) => {
   const aui = useAui();
 
   const [context] = useState(() =>
-    makeSmoothContext(aui.part().getState().status),
+    makeSmoothContext(aui.part.getState().status),
   );
 
   // do not wrap if there is an outer SmoothContextProvider

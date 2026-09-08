@@ -117,6 +117,115 @@ describe("toGenericMessages", () => {
       ]);
     });
 
+    it("preserves zero-byte file parts", () => {
+      const result = toGenericMessages([
+        {
+          role: "user",
+          content: [
+            {
+              type: "file",
+              data: "",
+              mimeType: "text/plain",
+              filename: "empty.txt",
+            },
+          ],
+        },
+      ]);
+
+      expect(result).toEqual([
+        {
+          role: "user",
+          content: [
+            {
+              type: "file",
+              data: "",
+              mediaType: "text/plain",
+              filename: "empty.txt",
+            },
+          ],
+        },
+      ]);
+    });
+
+    it.each([
+      { label: "empty", mimeType: "" },
+      { label: "missing", mimeType: undefined },
+    ])("falls back when a file MIME type is $label", ({ mimeType }) => {
+      const result = toGenericMessages([
+        {
+          role: "user",
+          content: [
+            {
+              type: "file",
+              data: "https://cdn.example.com/untyped-file",
+              ...(mimeType !== undefined && { mimeType }),
+              filename: "untyped-file",
+            },
+          ],
+        },
+      ]);
+
+      expect(result).toEqual([
+        {
+          role: "user",
+          content: [
+            {
+              type: "file",
+              data: new URL("https://cdn.example.com/untyped-file"),
+              mediaType: "application/octet-stream",
+              filename: "untyped-file",
+            },
+          ],
+        },
+      ]);
+    });
+
+    it("uses the data URL MIME type when the file MIME type is empty", () => {
+      const data = "data:text/plain;base64,";
+      const result = toGenericMessages([
+        {
+          role: "user",
+          content: [{ type: "file", data, mimeType: "" }],
+        },
+      ]);
+
+      expect(result).toEqual([
+        {
+          role: "user",
+          content: [
+            {
+              type: "file",
+              data: new URL(data),
+              mediaType: "text/plain",
+            },
+          ],
+        },
+      ]);
+    });
+
+    it("does not infer a MIME type from a malformed data URL", () => {
+      const data = "data:text/plain";
+      const result = toGenericMessages([
+        {
+          role: "user",
+          content: [{ type: "file", data, mimeType: "" }],
+        },
+      ]);
+
+      expect(result).toEqual([
+        {
+          role: "user",
+          content: [
+            {
+              type: "file",
+              data: new URL(data),
+              mediaType: "application/octet-stream",
+            },
+          ],
+        },
+      ]);
+    });
+
     it("handles attachments", () => {
       const result = toGenericMessages([
         {
@@ -151,6 +260,54 @@ describe("toGenericMessages", () => {
       ]);
     });
 
+    it("carries a file part filename through", () => {
+      const result = toGenericMessages([
+        {
+          role: "user",
+          content: [
+            {
+              type: "file",
+              data: "https://cdn.example.com/a.pdf",
+              mimeType: "application/pdf",
+              filename: "invoice.pdf",
+            },
+          ],
+        },
+      ] as never);
+
+      expect(result).toEqual([
+        {
+          role: "user",
+          content: [
+            {
+              type: "file",
+              data: new URL("https://cdn.example.com/a.pdf"),
+              mediaType: "application/pdf",
+              filename: "invoice.pdf",
+            },
+          ],
+        },
+      ]);
+    });
+
+    it("omits filename when the part has none", () => {
+      const result = toGenericMessages([
+        {
+          role: "user",
+          content: [
+            {
+              type: "file",
+              data: "https://cdn.example.com/a.pdf",
+              mimeType: "application/pdf",
+            },
+          ],
+        },
+      ] as never);
+
+      const part = (result[0] as { content: unknown[] }).content[0];
+      expect(part).not.toHaveProperty("filename");
+    });
+
     it("filters invalid parts", () => {
       const result = toGenericMessages([
         {
@@ -158,7 +315,7 @@ describe("toGenericMessages", () => {
           content: [
             { type: "text", text: "Valid" },
             { type: "image" }, // missing image property
-            { type: "file", data: "some-data" }, // missing mimeType
+            { type: "file", data: null } as never,
             { type: "unknown" },
           ],
         },
@@ -187,6 +344,23 @@ describe("toGenericMessages", () => {
         mediaType: "image/png",
       });
       expect((content[0] as { data: unknown }).data).toBeInstanceOf(URL);
+    });
+
+    it("infers a lowercase media type from an uppercase-scheme data URL", () => {
+      const dataUrl =
+        "DATA:IMAGE/PNG;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==";
+      const result = toGenericMessages([
+        {
+          role: "user",
+          content: [{ type: "image", image: dataUrl }],
+        },
+      ]);
+
+      const content = (result[0] as { content: unknown[] }).content;
+      expect(content[0]).toMatchObject({
+        type: "file",
+        mediaType: "image/png",
+      });
     });
 
     it("handles relative/invalid URL as string", () => {
@@ -243,7 +417,7 @@ describe("toGenericMessages", () => {
       ]);
     });
 
-    it("converts tool calls without results", () => {
+    it("closes out tool calls without results", () => {
       const result = toGenericMessages([
         {
           role: "assistant",
@@ -269,6 +443,196 @@ describe("toGenericMessages", () => {
               args: { city: "London" },
             },
           ],
+        },
+        {
+          role: "tool",
+          content: [
+            {
+              type: "tool-result",
+              toolCallId: "call_123",
+              toolName: "get_weather",
+              result: { error: "Tool call was not completed" },
+              isError: true,
+            },
+          ],
+        },
+      ]);
+    });
+
+    it.each([
+      ["a pending approval", { approval: { id: "ap_1" } }],
+      [
+        "an approved call the host has not run yet",
+        {
+          approval: { id: "ap_1", approved: true },
+        },
+      ],
+      ["an interrupted call", { interrupt: { type: "human", payload: {} } }],
+    ])("leaves %s untouched instead of failing it", (_label, extra) => {
+      const result = toGenericMessages([
+        {
+          role: "assistant",
+          content: [
+            {
+              type: "tool-call",
+              toolCallId: "call_123",
+              toolName: "get_weather",
+              args: { city: "London" },
+              ...extra,
+            },
+          ],
+        },
+      ]);
+
+      expect(result).toEqual([
+        {
+          role: "assistant",
+          content: [
+            {
+              type: "tool-call",
+              toolCallId: "call_123",
+              toolName: "get_weather",
+              args: { city: "London" },
+            },
+          ],
+        },
+      ]);
+    });
+
+    it.each([
+      ["a cancelled approval", { id: "ap_1", resolution: "cancelled" }],
+      ["a denied approval carrying no result", { id: "ap_1", approved: false }],
+    ])("closes out %s", (_label, approval) => {
+      const result = toGenericMessages([
+        {
+          role: "assistant",
+          content: [
+            {
+              type: "tool-call",
+              toolCallId: "call_123",
+              toolName: "get_weather",
+              args: { city: "London" },
+              approval,
+            },
+          ],
+        },
+      ]);
+
+      expect(result).toEqual([
+        {
+          role: "assistant",
+          content: [
+            {
+              type: "tool-call",
+              toolCallId: "call_123",
+              toolName: "get_weather",
+              args: { city: "London" },
+            },
+          ],
+        },
+        {
+          role: "tool",
+          content: [
+            {
+              type: "tool-result",
+              toolCallId: "call_123",
+              toolName: "get_weather",
+              result: { error: "Tool call was not completed" },
+              isError: true,
+            },
+          ],
+        },
+      ]);
+    });
+
+    it("treats a settled tool call carrying no result as completed", () => {
+      const result = toGenericMessages([
+        {
+          role: "assistant",
+          content: [
+            {
+              type: "tool-call",
+              toolCallId: "call_123",
+              toolName: "void_tool",
+              args: {},
+              state: "result",
+            },
+          ],
+        },
+      ]);
+
+      expect(result).toEqual([
+        {
+          role: "assistant",
+          content: [
+            {
+              type: "tool-call",
+              toolCallId: "call_123",
+              toolName: "void_tool",
+              args: {},
+            },
+          ],
+        },
+        {
+          role: "tool",
+          content: [
+            {
+              type: "tool-result",
+              toolCallId: "call_123",
+              toolName: "void_tool",
+              result: "<no result>",
+            },
+          ],
+        },
+      ]);
+    });
+
+    it("closes out a tool call left unresolved before a later message", () => {
+      const result = toGenericMessages([
+        {
+          role: "assistant",
+          content: [
+            {
+              type: "tool-call",
+              toolCallId: "call_123",
+              toolName: "get_weather",
+              args: { city: "London" },
+            },
+          ],
+        },
+        {
+          role: "user",
+          content: [{ type: "text", text: "never mind" }],
+        },
+      ]);
+
+      expect(result).toEqual([
+        {
+          role: "assistant",
+          content: [
+            {
+              type: "tool-call",
+              toolCallId: "call_123",
+              toolName: "get_weather",
+              args: { city: "London" },
+            },
+          ],
+        },
+        {
+          role: "tool",
+          content: [
+            {
+              type: "tool-result",
+              toolCallId: "call_123",
+              toolName: "get_weather",
+              result: { error: "Tool call was not completed" },
+              isError: true,
+            },
+          ],
+        },
+        {
+          role: "user",
+          content: [{ type: "text", text: "never mind" }],
         },
       ]);
     });
@@ -472,6 +836,18 @@ describe("toGenericMessages", () => {
             },
           ],
         },
+        {
+          role: "tool",
+          content: [
+            {
+              type: "tool-result",
+              toolCallId: "call_123",
+              toolName: "no_args_tool",
+              result: { error: "Tool call was not completed" },
+              isError: true,
+            },
+          ],
+        },
       ]);
     });
 
@@ -540,6 +916,13 @@ describe("toGenericMessages", () => {
             },
             {
               type: "tool-result",
+              toolCallId: "call_2",
+              toolName: "tool_b",
+              result: { error: "Tool call was not completed" },
+              isError: true,
+            },
+            {
+              type: "tool-result",
               toolCallId: "call_3",
               toolName: "tool_c",
               result: "result_c",
@@ -563,66 +946,30 @@ describe("toGenericMessages", () => {
       expect(content[0]!.mediaType).toBe(expectedType);
     };
 
-    it("handles jpg extension", () => {
+    it("maps known extensions to their media types", () => {
       testMediaType("https://example.com/photo.jpg", "image/jpeg");
-    });
-
-    it("handles jpeg extension", () => {
       testMediaType("https://example.com/photo.jpeg", "image/jpeg");
-    });
-
-    it("handles png extension", () => {
       testMediaType("https://example.com/photo.png", "image/png");
-    });
-
-    it("handles gif extension", () => {
       testMediaType("https://example.com/photo.gif", "image/gif");
-    });
-
-    it("handles webp extension", () => {
       testMediaType("https://example.com/photo.webp", "image/webp");
-    });
-
-    it("handles svg extension", () => {
       testMediaType("https://example.com/icon.svg", "image/svg+xml");
-    });
-
-    it("handles avif extension", () => {
       testMediaType("https://example.com/photo.avif", "image/avif");
-    });
-
-    it("handles bmp extension", () => {
       testMediaType("https://example.com/photo.bmp", "image/bmp");
-    });
-
-    it("handles ico extension", () => {
       testMediaType("https://example.com/favicon.ico", "image/x-icon");
-    });
-
-    it("handles tiff extension", () => {
       testMediaType("https://example.com/photo.tiff", "image/tiff");
-    });
-
-    it("handles tif extension", () => {
       testMediaType("https://example.com/photo.tif", "image/tiff");
     });
 
-    it("defaults to image/png for unknown extension", () => {
+    it("defaults to image/png for unknown or missing extensions", () => {
       testMediaType("https://example.com/photo.unknown", "image/png");
-    });
-
-    it("defaults to image/png for no extension", () => {
       testMediaType("https://example.com/photo", "image/png");
     });
 
-    it("handles query params in URL", () => {
+    it("ignores query params and casing in the extension", () => {
       testMediaType(
         "https://example.com/photo.jpg?size=large&quality=high",
         "image/jpeg",
       );
-    });
-
-    it("handles uppercase extensions", () => {
       testMediaType("https://example.com/photo.JPG", "image/jpeg");
     });
   });

@@ -1,13 +1,14 @@
-import { isDevelopment } from "./env";
-import { ResourceFiber } from "../types";
+import type { ResourceFiber } from "../types";
 
-let currentResourceFiber: ResourceFiber<any, any> | null = null;
+let currentResourceFiber: ResourceFiber<any> | null = null;
 
-export function withResourceFiber<R, P>(
-  fiber: ResourceFiber<R, P>,
+export function withResourceFiber<R>(
+  fiber: ResourceFiber<R>,
   fn: () => void,
 ): void {
   fiber.currentIndex = 0;
+  fiber.wipContextDeps = null;
+  fiber.wipCommitCallbacks = [];
 
   const previousContext = currentResourceFiber;
   currentResourceFiber = fiber;
@@ -27,17 +28,13 @@ export function withResourceFiber<R, P>(
     currentResourceFiber = previousContext;
   }
 }
-export function getCurrentResourceFiber(): ResourceFiber<unknown, unknown> {
+export function getCurrentResourceFiber(): ResourceFiber<unknown> {
   if (!currentResourceFiber) {
     throw new Error("No resource fiber available");
   }
   return currentResourceFiber;
 }
 
-export function getDevStrictMode(enable: boolean) {
-  if (!isDevelopment) return null;
-  if (currentResourceFiber?.devStrictMode)
-    return currentResourceFiber.isFirstRender ? "child" : "root";
-
-  return enable ? "root" : null;
+export function peekResourceFiber(): ResourceFiber<unknown> | null {
+  return currentResourceFiber;
 }

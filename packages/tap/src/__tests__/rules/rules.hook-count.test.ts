@@ -1,27 +1,28 @@
+/* oxlint-disable react/rules-of-hooks -- tests deliberately exercise conditional/nested hook patterns */
 import { describe, it, expect } from "vitest";
-import { tapEffect } from "../../hooks/tap-effect";
-import { tapState } from "../../hooks/tap-state";
+import { useEffect } from "../../react-hooks/useEffect";
+import { useState } from "../../react-hooks/useState";
 import { createTestResource, renderTest } from "../test-utils";
 import { renderResourceFiber } from "../../core/ResourceFiber";
 
 describe("Rules of Hooks - Hook Count", () => {
   it("should establish hook count on first render", () => {
     const resource = createTestResource(() => {
-      const [a] = tapState(1);
-      const [b] = tapState(2);
-      const [c] = tapState(3);
-      tapEffect(() => {});
-      tapEffect(() => {});
+      const [a] = useState(1);
+      const [b] = useState(2);
+      const [c] = useState(3);
+      useEffect(() => {});
+      useEffect(() => {});
 
       return { a, b, c };
     });
 
     // First render establishes 5 hooks
-    renderTest(resource, undefined);
+    renderTest(resource);
 
     // Second render should work with same count
     expect(() => {
-      renderTest(resource, undefined);
+      renderTest(resource);
     }).not.toThrow();
   });
 
@@ -29,23 +30,23 @@ describe("Rules of Hooks - Hook Count", () => {
     let addExtraHook = false;
 
     const resource = createTestResource(() => {
-      tapState(1);
-      tapState(2);
+      useState(1);
+      useState(2);
 
       if (addExtraHook) {
-        tapState(3); // Extra hook
+        useState(3); // Extra hook
       }
 
       return null;
     });
 
     // First render with 2 hooks
-    renderResourceFiber(resource, undefined);
+    renderResourceFiber(resource, []);
 
     // Try to render with 3 hooks
     addExtraHook = true;
 
-    expect(() => renderResourceFiber(resource, undefined)).toThrow(
+    expect(() => renderResourceFiber(resource, [])).toThrow(
       "Rendered more hooks than during the previous render",
     );
   });
@@ -54,23 +55,23 @@ describe("Rules of Hooks - Hook Count", () => {
     let skipHook = false;
 
     const resource = createTestResource(() => {
-      tapState(1);
+      useState(1);
 
       if (!skipHook) {
-        tapState(2);
+        useState(2);
       }
 
-      tapState(3);
+      useState(3);
       return null;
     });
 
     // First render with 3 hooks
-    renderResourceFiber(resource, undefined);
+    renderResourceFiber(resource, []);
 
     // Try to render with 2 hooks
     skipHook = true;
 
-    expect(() => renderResourceFiber(resource, undefined)).toThrow(
+    expect(() => renderResourceFiber(resource, [])).toThrow(
       "Rendered 2 hooks but expected 3",
     );
   });
@@ -79,20 +80,20 @@ describe("Rules of Hooks - Hook Count", () => {
     let includeEffect = true;
 
     const resource = createTestResource(() => {
-      tapState(1);
-      tapState(2);
+      useState(1);
+      useState(2);
 
       if (includeEffect) {
-        tapEffect(() => {});
+        useEffect(() => {});
       }
       return null;
     });
 
-    renderResourceFiber(resource, undefined);
+    renderResourceFiber(resource, []);
 
     includeEffect = false;
 
-    expect(() => renderResourceFiber(resource, undefined)).toThrow(
+    expect(() => renderResourceFiber(resource, [])).toThrow(
       "Rendered 2 hooks but expected 3",
     );
   });
@@ -103,10 +104,10 @@ describe("Rules of Hooks - Hook Count", () => {
       return "no hooks";
     });
 
-    renderTest(resource, undefined);
+    renderTest(resource);
 
     // Should allow multiple renders with zero hooks
-    expect(() => renderTest(resource, undefined)).not.toThrow();
+    expect(() => renderTest(resource)).not.toThrow();
   });
 
   it("should detect dynamic hook creation", () => {
@@ -114,17 +115,17 @@ describe("Rules of Hooks - Hook Count", () => {
 
     const resource = createTestResource(() => {
       for (let i = 0; i < hookCount; i++) {
-        tapState(i);
+        useState(i);
       }
       return null;
     });
 
-    renderResourceFiber(resource, undefined);
+    renderResourceFiber(resource, []);
 
     // Change hook count
     hookCount = 3;
 
-    expect(() => renderResourceFiber(resource, undefined)).toThrow(
+    expect(() => renderResourceFiber(resource, [])).toThrow(
       "Rendered more hooks than during the previous render",
     );
   });
@@ -134,16 +135,16 @@ describe("Rules of Hooks - Hook Count", () => {
 
     const resource = createTestResource(() => {
       renderCount++;
-      const [a] = tapState(1);
-      const [b] = tapState(2);
-      tapEffect(() => {});
+      const [a] = useState(1);
+      const [b] = useState(2);
+      useEffect(() => {});
 
       return { a, b, renderCount };
     });
 
     // Multiple renders should all maintain same hook count
     for (let i = 0; i < 5; i++) {
-      expect(() => renderTest(resource, undefined)).not.toThrow();
+      expect(() => renderTest(resource)).not.toThrow();
     }
 
     expect(renderCount).toBe(5);
@@ -151,49 +152,49 @@ describe("Rules of Hooks - Hook Count", () => {
 
   it("should track count separately for different resource instances", () => {
     const resource1 = createTestResource(() => {
-      tapState(1);
-      tapState(2);
+      useState(1);
+      useState(2);
       return "two hooks";
     });
 
     const resource2 = createTestResource(() => {
-      tapState(1);
-      tapState(2);
-      tapState(3);
-      tapEffect(() => {});
+      useState(1);
+      useState(2);
+      useState(3);
+      useEffect(() => {});
       return "four hooks";
     });
 
     // Render both
-    renderTest(resource1, undefined);
-    renderTest(resource2, undefined);
+    renderTest(resource1);
+    renderTest(resource2);
 
     // Each should maintain its own count
-    expect(() => renderTest(resource1, undefined)).not.toThrow();
-    expect(() => renderTest(resource2, undefined)).not.toThrow();
+    expect(() => renderTest(resource1)).not.toThrow();
+    expect(() => renderTest(resource2)).not.toThrow();
   });
 
   it("should detect hook count changes in nested function calls", () => {
     let useExtraHooks = false;
 
     const useFeature = () => {
-      tapState("feature");
+      useState("feature");
       if (useExtraHooks) {
-        tapState("extra");
+        useState("extra");
       }
     };
 
     const resource = createTestResource(() => {
-      tapState("main");
+      useState("main");
       useFeature();
       return null;
     });
 
-    renderResourceFiber(resource, undefined);
+    renderResourceFiber(resource, []);
 
     useExtraHooks = true;
 
-    expect(() => renderResourceFiber(resource, undefined)).toThrow(
+    expect(() => renderResourceFiber(resource, [])).toThrow(
       "Rendered more hooks than during the previous render",
     );
   });

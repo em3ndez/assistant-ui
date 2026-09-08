@@ -1,14 +1,43 @@
-import type {
-  MessageRole,
-  RunConfig,
-  QuoteInfo,
-  Attachment,
-  CreateAttachment,
-  Unsubscribe,
-} from "../../types";
+import type { MessageRole } from "../../types/message";
+import type { QuoteInfo } from "../../types/quote";
+import type { Attachment, CreateAttachment } from "../../types/attachment";
+import type { Unsubscribe } from "../../types/unsubscribe";
+import type { RunConfig } from "../../types/message";
 import type { DictationAdapter } from "../../adapters/speech";
+import type { QueueItemState } from "../queue/queue-item";
+import type { QueuePlacement } from "../queue/external-thread-queue-adapter";
 
-export type ComposerRuntimeEventType = "send" | "attachmentAdd";
+export type AttachmentAddErrorReason =
+  | "no-adapter"
+  | "not-accepted"
+  | "adapter-error";
+
+export type AttachmentAddErrorEvent = {
+  readonly reason: AttachmentAddErrorReason;
+  readonly message: string;
+  readonly attachmentId?: string;
+  readonly error?: Error;
+};
+
+export type ComposerRuntimeEventPayload = {
+  /**
+   * @deprecated State-derivable. Observe `state.text` clearing via
+   * `subscribe` + `getState` instead. Kept for backward compatibility.
+   */
+  send: Record<string, never>;
+  /**
+   * @deprecated State-derivable. Observe `state.attachments` via `subscribe` +
+   * `getState` instead. Kept for backward compatibility.
+   */
+  attachmentAdd: Record<string, never>;
+  attachmentAddError: AttachmentAddErrorEvent;
+};
+
+export type ComposerRuntimeEventType = keyof ComposerRuntimeEventPayload;
+
+export type ComposerRuntimeEventCallback<E extends ComposerRuntimeEventType> = (
+  payload: ComposerRuntimeEventPayload[E],
+) => void;
 
 export type DictationState = {
   readonly status: DictationAdapter.Status;
@@ -16,10 +45,17 @@ export type DictationState = {
   readonly inputDisabled?: boolean;
 };
 
+export type SendOptions = {
+  startRun?: boolean;
+  /** Process this message next; only meaningful with the `queue` capability. */
+  steer?: boolean;
+};
+
 export type ComposerRuntimeCore = Readonly<{
   isEditing: boolean;
 
   canCancel: boolean;
+  canSend: boolean;
   isEmpty: boolean;
 
   attachments: readonly Attachment[];
@@ -43,8 +79,12 @@ export type ComposerRuntimeCore = Readonly<{
   reset: () => Promise<void>;
   clearAttachments: () => Promise<void>;
 
-  send: () => void;
+  send: (options?: SendOptions) => void;
   cancel: () => void;
+
+  queue: readonly QueueItemState[];
+  moveQueueItem: (queueItemId: string, placement: QueuePlacement) => void;
+  removeQueueItem: (queueItemId: string) => void;
 
   dictation: DictationState | undefined;
   startDictation: () => void;
@@ -52,10 +92,21 @@ export type ComposerRuntimeCore = Readonly<{
 
   subscribe: (callback: () => void) => Unsubscribe;
 
-  unstable_on: (
-    event: ComposerRuntimeEventType,
-    callback: () => void,
+  /**
+   * @deprecated This API is still under active development and might change without notice.
+   * For state-derivable transitions, prefer `subscribe` + `getState`. This channel is the
+   * escape hatch for transient occurrences not represented in state.
+   */
+  unstable_on: <E extends ComposerRuntimeEventType>(
+    event: E,
+    callback: ComposerRuntimeEventCallback<E>,
   ) => Unsubscribe;
 }>;
 
 export type ThreadComposerRuntimeCore = ComposerRuntimeCore;
+
+export type EditComposerRuntimeCore = ComposerRuntimeCore &
+  Readonly<{
+    parentId: string | null;
+    sourceId: string | null;
+  }>;

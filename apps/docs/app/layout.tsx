@@ -1,15 +1,28 @@
 import "@/styles/globals.css";
 import type { ReactNode } from "react";
-import { GeistSans } from "geist/font/sans";
-import { GeistMono } from "geist/font/mono";
-import Script from "next/script";
-import { Analytics } from "@vercel/analytics/next";
+import { JetBrains_Mono, Public_Sans } from "next/font/google";
 import { Provider } from "./provider";
+import { SiteAssistant } from "@/components/pages/docs/assistant/site-assistant";
 import { cn } from "@/lib/utils";
 import { BASE_URL } from "@/lib/constants";
+import { GenerativeUIStyle } from "@/components/generative-ui-style";
+import { galleryStagingCss } from "@/components/gallery/gallery-staging";
+import { umamiBootstrapScript } from "@/lib/umami-sampling";
+import { AnalyticsGate } from "@/components/analytics-gate";
+import { ConsentBanner } from "@/components/consent-banner";
+
+const publicSans = Public_Sans({
+  variable: "--font-public-sans",
+  subsets: ["latin"],
+});
+
+const jetbrainsMono = JetBrains_Mono({
+  variable: "--font-jetbrains-mono",
+  subsets: ["latin"],
+});
 
 const getMetadataBase = () => {
-  const appUrl = process.env["NEXT_PUBLIC_APP_URL"];
+  const appUrl = process.env.NEXT_PUBLIC_APP_URL;
   if (appUrl) {
     return new URL(appUrl);
   }
@@ -29,13 +42,15 @@ export const viewport = {
 export const metadata = {
   metadataBase: getMetadataBase(),
   title: {
-    template: "%s | assistant-ui",
-    default: "assistant-ui",
+    template: "%s · assistant-ui",
+    default: "assistant-ui · The frontend library for AI agents",
   },
-  description: "The TypeScript/React library for AI Chat",
+  description:
+    "Open-source React components and runtimes for building AI chat. Streaming, tools, and persistence in TypeScript.",
   openGraph: {
     title: "assistant-ui",
-    description: "The TypeScript/React library for AI Chat",
+    description:
+      "Open-source React components and runtimes for building AI chat. Streaming, tools, and persistence in TypeScript.",
     siteName: "assistant-ui",
     type: "website",
     images: [
@@ -50,7 +65,8 @@ export const metadata = {
   twitter: {
     card: "summary_large_image",
     title: "assistant-ui",
-    description: "The TypeScript/React library for AI Chat",
+    description:
+      "Open-source React components and runtimes for building AI chat. Streaming, tools, and persistence in TypeScript.",
     images: ["/api/og?variant=home"],
   },
 };
@@ -59,42 +75,30 @@ export default function Layout({ children }: { children: ReactNode }) {
   return (
     <html lang="en" suppressHydrationWarning>
       <head>
-        {process.env.NODE_ENV === "development" && (
-          <Script
-            src="//unpkg.com/react-grab/dist/index.global.js"
-            crossOrigin="anonymous"
-            strategy="beforeInteractive"
-          />
-        )}
-        {/*<script
-          crossOrigin="anonymous"
-          src="//unpkg.com/react-scan/dist/auto.global.js"
-        />*/}
-        <script
-          defer
-          src="/umami/script.js"
-          data-website-id="6f07c001-46a2-411f-9241-4f7f5afb60ee"
-          data-domains="www.assistant-ui.com"
-        ></script>
-        <Script
-          id="vector-script"
-          dangerouslySetInnerHTML={{
-            __html: `
-        !function(e,r){try{if(e.vector)return void console.log("Vector snippet included more than once.");var t={};t.q=t.q||[];for(var o=["load","identify","on"],n=function(e){return function(){var r=Array.prototype.slice.call(arguments);t.q.push([e,r])}},c=0;c<o.length;c++){var a=o[c];t[a]=n(a)}if(e.vector=t,!t.loaded){var i=r.createElement("script");i.type="text/javascript",i.async=!0,i.src="https://cdn.vector.co/pixel.js";var l=r.getElementsByTagName("script")[0];l.parentNode.insertBefore(i,l),t.loaded=!0}}catch(e){console.error("Error loading Vector:",e)}}(window,document);
-        vector.load("d9af9bfb-c10c-4eed-9366-57cdc0a97ee9");
-    `,
-          }}
-        />
+        <GenerativeUIStyle />
+        <style>{galleryStagingCss}</style>
+        <script dangerouslySetInnerHTML={{ __html: umamiBootstrapScript }} />
       </head>
       <body
         className={cn(
-          "flex min-h-screen flex-col antialiased",
-          GeistSans.className,
-          GeistMono.variable,
+          "flex min-h-screen flex-col font-sans antialiased",
+          publicSans.variable,
+          jetbrainsMono.variable,
         )}
       >
-        <Provider>{children}</Provider>
-        <Analytics />
+        <div aria-hidden="true" className="sr-only">
+          For AI agents: a documentation index is available at{" "}
+          <a href="/llms.txt" tabIndex={-1}>
+            llms.txt
+          </a>
+          . Use .md for canonical markdown pages; .mdx is kept as a
+          backwards-compatible alias on supported URL paths.
+        </div>
+        <Provider>
+          <SiteAssistant>{children}</SiteAssistant>
+        </Provider>
+        <AnalyticsGate />
+        <ConsentBanner />
       </body>
     </html>
   );

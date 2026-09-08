@@ -1,6 +1,6 @@
 "use client";
 
-import { Primitive } from "@radix-ui/react-primitive";
+import { Primitive } from "../../utils/Primitive";
 import {
   type ComponentRef,
   type ComponentPropsWithoutRef,
@@ -8,7 +8,7 @@ import {
   useCallback,
 } from "react";
 import { useAui, useAuiState } from "@assistant-ui/store";
-import { composeEventHandlers } from "@radix-ui/primitive";
+import { composeEventHandlers } from "radix-ui/internal";
 
 // ---- Root ----
 
@@ -93,7 +93,7 @@ export const ComposerPrimitiveQuoteDismiss = forwardRef<
 >(({ onClick, ...props }, forwardedRef) => {
   const aui = useAui();
   const handleDismiss = useCallback(() => {
-    aui.composer().setQuote(undefined);
+    aui.composer.setQuote(undefined);
   }, [aui]);
 
   return (

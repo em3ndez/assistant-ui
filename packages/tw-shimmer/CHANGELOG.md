@@ -1,5 +1,37 @@
 # tw-shimmer
 
+## 0.4.12
+
+### Patch Changes
+
+- [#4746](https://github.com/assistant-ui/assistant-ui/pull/4746) [`0686f4e`](https://github.com/assistant-ui/assistant-ui/commit/0686f4e6b8ee5f6e17c968997ef11622ef8f9c98) - chore: update dependencies ([@Yonom](https://github.com/Yonom))
+
+- [#4966](https://github.com/assistant-ui/assistant-ui/pull/4966) [`0fb38cb`](https://github.com/assistant-ui/assistant-ui/commit/0fb38cb9002b531f5c3902be0d59cc4ccd7099c7) - fix background shimmer animation speed in Firefox ([@Kinfe123](https://github.com/Kinfe123))
+
+## 0.4.11
+
+### Patch Changes
+
+- 1083599: fix: add "style" export condition for CSS entries so Tailwind CSS v4 `@import` can resolve packages
+
+## 0.4.10
+
+### Patch Changes
+
+- 094fa56: fix: register shimmer-bg as standalone @utility for Tailwind v4 tooling recognition
+
+## 0.4.9
+
+### Patch Changes
+
+- 349f3c7: chore: update deps
+
+## 0.4.8
+
+### Patch Changes
+
+- a845911: chore: update dependencies
+
 ## 0.4.7
 
 ### Patch Changes

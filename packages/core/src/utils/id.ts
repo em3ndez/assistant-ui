@@ -1,13 +1,12 @@
 import { customAlphabet } from "nanoid/non-secure";
 
+/**
+ * @deprecated This API is experimental and may change without notice.
+ */
 export const generateId = customAlphabet(
   "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz",
   7,
 );
-
-const optimisticPrefix = "__optimistic__";
-export const generateOptimisticId = () => `${optimisticPrefix}${generateId()}`;
-export const isOptimisticId = (id: string) => id.startsWith(optimisticPrefix);
 
 const errorPrefix = "__error__";
 export const generateErrorMessageId = () => `${errorPrefix}${generateId()}`;

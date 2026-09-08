@@ -2,17 +2,22 @@ import type { ReadonlyJSONValue } from "assistant-stream/utils";
 import type {
   RuntimeCapabilities,
   SpeechState,
+  VoiceSessionState,
   ThreadSuggestion,
-  ExportedMessageRepository,
-  ThreadMessageLike,
+} from "../../runtime/interfaces/thread-runtime-core";
+import type { ExportedMessageRepository } from "../../runtime/utils/message-repository";
+import type { Unsubscribe } from "../../types/unsubscribe";
+import type { ThreadMessageLike } from "../../runtime/utils/thread-message-like";
+import type {
   CreateAppendMessage,
   CreateStartRunConfig,
   CreateResumeRunConfig,
   ThreadRuntime,
-} from "../../runtime";
-import type { ModelContext } from "../../model-context";
+} from "../../runtime/api/thread-runtime";
+import type { ModelContext } from "../../model-context/types";
 import type { MessageMethods, MessageState } from "./message";
 import type { ComposerMethods, ComposerState } from "./composer";
+import type { SuggestionsMethods } from "./suggestions";
 
 export type ThreadState = {
   /**
@@ -54,6 +59,7 @@ export type ThreadState = {
   readonly extras: unknown;
   /** @deprecated This API is still under active development and might change without notice. */
   readonly speech: SpeechState | undefined;
+  readonly voice: VoiceSessionState | undefined;
   readonly composer: ComposerState;
 };
 
@@ -66,6 +72,10 @@ export type ThreadMethods = {
    * The thread composer runtime.
    */
   composer(): ComposerMethods;
+  /**
+   * The suggestions shown for this thread.
+   */
+  suggestions(): SuggestionsMethods;
   /**
    * Append a new message to the thread.
    *
@@ -83,6 +93,7 @@ export type ThreadMethods = {
    * ```
    */
   append(message: CreateAppendMessage): void;
+  deleteMessage(messageId: string): void | Promise<void>;
   /**
    * Start a new run with the given configuration.
    * @param config The configuration for starting the run
@@ -92,8 +103,20 @@ export type ThreadMethods = {
    * Resume a run with the given configuration.
    * @param config The configuration for resuming the run
    */
-  unstable_resumeRun(config: CreateResumeRunConfig): void;
+  resumeRun(config: CreateResumeRunConfig): void;
   cancelRun(): void;
+  /**
+   * Re-fetch this thread's state from its backing store, in place: the tap
+   * thread's refetch hook, which `threads.reloadMainThread()` prefers and
+   * whose rejection it propagates. `capabilities.refetchThread` is the
+   * portable feature-detection signal; a legacy-bridged thread reports it
+   * there while routing the refetch through its runtime, not this method.
+   * The method-shorthand optionality is load-bearing: an explicit
+   * `| undefined` stops `ThreadMethods` satisfying `ClientMethods` and
+   * collapses the client schema, which only a workspace-level app typecheck
+   * surfaces.
+   */
+  unstable_refetchThread?(): Promise<void>;
   getModelContext(): ModelContext;
   export(): ExportedMessageRepository;
   import(repository: ExportedMessageRepository): void;
@@ -102,17 +125,16 @@ export type ThreadMethods = {
    * @param initialMessages - Optional array of initial messages to populate the thread
    */
   reset(initialMessages?: readonly ThreadMessageLike[]): void;
+  importExternalState(state: unknown): void;
   message(selector: { id: string } | { index: number }): MessageMethods;
   /** @deprecated This API is still under active development and might change without notice. */
   stopSpeaking(): void;
-  /**
-   * Start the voice session for the thread. Establishes any necessary media connections.
-   */
-  startVoice(): Promise<void>;
-  /**
-   * Stop the currently active voice session.
-   */
-  stopVoice(): Promise<void>;
+  connectVoice(): void;
+  disconnectVoice(): void;
+  getVoiceVolume(): number;
+  subscribeVoiceVolume(callback: () => void): Unsubscribe;
+  muteVoice(): void;
+  unmuteVoice(): void;
   __internal_getRuntime?(): ThreadRuntime;
 };
 
@@ -122,9 +144,27 @@ export type ThreadMeta = {
 };
 
 export type ThreadEvents = {
+  /**
+   * A run started on this thread. Also observable as `isRunning` flipping to
+   * `true` in thread state.
+   */
   "thread.runStart": { threadId: string };
+  /**
+   * A run on this thread ended, whether it completed, errored, or was
+   * cancelled. Also observable as `isRunning` flipping to `false` in thread
+   * state.
+   */
   "thread.runEnd": { threadId: string };
+  /**
+   * The thread transitioned from new to initialized. Fires before the first
+   * message is added, so read thread state via `useAuiState` rather than
+   * inside this event handler.
+   */
   "thread.initialize": { threadId: string };
+  /**
+   * Truly transient. Model context lives in a provider, not in thread state,
+   * so this event has no state-derivable equivalent.
+   */
   "thread.modelContextUpdate": { threadId: string };
 };
 

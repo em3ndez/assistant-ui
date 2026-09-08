@@ -1,21 +1,24 @@
-import type {
-  Attachment,
-  CreateAttachment,
-  MessageRole,
-  RunConfig,
-  QuoteInfo,
-  Unsubscribe,
-} from "../../types";
+import type { Attachment, CreateAttachment } from "../../types/attachment";
+import type { MessageRole } from "../../types/message";
+import type { QuoteInfo } from "../../types/quote";
+import type { Unsubscribe } from "../../types/unsubscribe";
+import type { RunConfig } from "../../types/message";
+import type { QueueItemState } from "../queue/queue-item";
+import type { QueuePlacement } from "../queue/external-thread-queue-adapter";
 import {
   LazyMemoizeSubject,
+  EventSubscriptionSubject,
+} from "../../subscribable/subscribable";
+import {
   ShallowMemoizeSubject,
   SKIP_UPDATE,
-  EventSubscriptionSubject,
-} from "../../subscribable";
+} from "../../subscribable/subscribable";
 import type {
-  ComposerRuntimeCore,
+  ComposerRuntimeEventCallback,
   ComposerRuntimeEventType,
   DictationState,
+  EditComposerRuntimeCore,
+  SendOptions,
   ThreadComposerRuntimeCore,
 } from "../interfaces/composer-runtime-core";
 import type {
@@ -39,7 +42,13 @@ export type {
 };
 
 type BaseComposerState = {
+  /**
+   * Whether the composer can cancel the current run. `true` when the runtime
+   * supports cancel and a run is in flight, not merely when cancel is a
+   * capability.
+   */
   readonly canCancel: boolean;
+  readonly canSend: boolean;
   readonly isEditing: boolean;
   readonly isEmpty: boolean;
 
@@ -61,6 +70,9 @@ type BaseComposerState = {
    * Undefined when no quote is set.
    */
   readonly quote: QuoteInfo | undefined;
+
+  /** Messages waiting to be processed. Empty unless the `queue` capability is set. */
+  readonly queue: readonly QueueItemState[];
 };
 
 export type ThreadComposerState = BaseComposerState & {
@@ -69,6 +81,8 @@ export type ThreadComposerState = BaseComposerState & {
 
 export type EditComposerState = BaseComposerState & {
   readonly type: "edit";
+  readonly parentId: string | null;
+  readonly sourceId: string | null;
 };
 
 export type ComposerState = ThreadComposerState | EditComposerState;
@@ -83,6 +97,7 @@ const getThreadComposerState = (
 
     isEditing: runtime?.isEditing ?? false,
     canCancel: runtime?.canCancel ?? false,
+    canSend: runtime?.canSend ?? false,
     isEmpty: runtime?.isEmpty ?? true,
 
     attachments: runtime?.attachments ?? EMPTY_ARRAY,
@@ -92,19 +107,21 @@ const getThreadComposerState = (
     attachmentAccept: runtime?.attachmentAccept ?? "",
     dictation: runtime?.dictation,
     quote: runtime?.quote,
+    queue: runtime?.queue ?? EMPTY_ARRAY,
 
     value: runtime?.text ?? "",
   });
 };
 
 const getEditComposerState = (
-  runtime: ComposerRuntimeCore | undefined,
+  runtime: EditComposerRuntimeCore | undefined,
 ): EditComposerState => {
   return Object.freeze({
     type: "edit",
 
     isEditing: runtime?.isEditing ?? false,
     canCancel: runtime?.canCancel ?? false,
+    canSend: runtime?.canSend ?? false,
     isEmpty: runtime?.isEmpty ?? true,
 
     text: runtime?.text ?? "",
@@ -114,6 +131,10 @@ const getEditComposerState = (
     attachmentAccept: runtime?.attachmentAccept ?? "",
     dictation: runtime?.dictation,
     quote: runtime?.quote,
+    queue: runtime?.queue ?? EMPTY_ARRAY,
+
+    parentId: runtime?.parentId ?? null,
+    sourceId: runtime?.sourceId ?? null,
 
     value: runtime?.text ?? "",
   });
@@ -131,8 +152,10 @@ export type ComposerRuntime = {
   /**
    * Add an attachment to the composer. Accepts either a standard File object
    * (processed through the AttachmentAdapter) or a CreateAttachment descriptor
-   * for external-source attachments (URLs, API data, CMS references) that
-   * bypasses the adapter entirely.
+   * for external-source attachments (URLs, API data, CMS references). External
+   * descriptors bypass the adapter's `add()` step but still respect
+   * `adapter.accept` when an adapter is configured; without an adapter they
+   * are added as-is.
    * @param fileOrAttachment The file or attachment descriptor to add.
    */
   addAttachment(fileOrAttachment: File | CreateAttachment): Promise<void>;
@@ -174,13 +197,23 @@ export type ComposerRuntime = {
 
   /**
    * Send a message. This will send whatever text or attachments are in the composer.
+   * @param options Optional send options. Use `{ startRun: true }` to force starting a new run.
    */
-  send(): void;
+  send(options?: SendOptions): void;
 
   /**
    * Cancel the current run. In edit mode, this will exit edit mode.
    */
   cancel(): void;
+
+  /** @deprecated Use `moveQueueItem(queueItemId, { lane: "steer", insertAfter: null })` instead. Removal after 2026-11-05. */
+  steerQueueItem(queueItemId: string): void;
+
+  /** Move a queued message between lanes or within a lane. */
+  moveQueueItem(queueItemId: string, placement: QueuePlacement): void;
+
+  /** Remove a queued message. */
+  removeQueueItem(queueItemId: string): void;
 
   /**
    * Listens for changes to the composer state.
@@ -214,9 +247,9 @@ export type ComposerRuntime = {
   /**
    * @deprecated This API is still under active development and might change without notice.
    */
-  unstable_on(
-    event: ComposerRuntimeEventType,
-    callback: () => void,
+  unstable_on<E extends ComposerRuntimeEventType>(
+    event: E,
+    callback: ComposerRuntimeEventCallback<E>,
   ): Unsubscribe;
 };
 
@@ -227,7 +260,11 @@ export abstract class ComposerRuntimeImpl implements ComposerRuntime {
 
   public abstract get type(): "edit" | "thread";
 
-  constructor(protected _core: ComposerRuntimeCoreBinding) {}
+  protected _core: ComposerRuntimeCoreBinding;
+
+  constructor(_core: ComposerRuntimeCoreBinding) {
+    this._core = _core;
+  }
 
   protected __internal_bindMethods() {
     this.setText = this.setText.bind(this);
@@ -239,6 +276,9 @@ export abstract class ComposerRuntimeImpl implements ComposerRuntime {
     this.clearAttachments = this.clearAttachments.bind(this);
     this.send = this.send.bind(this);
     this.cancel = this.cancel.bind(this);
+    this.steerQueueItem = this.steerQueueItem.bind(this);
+    this.moveQueueItem = this.moveQueueItem.bind(this);
+    this.removeQueueItem = this.removeQueueItem.bind(this);
     this.setRole = this.setRole.bind(this);
     this.getAttachmentByIndex = this.getAttachmentByIndex.bind(this);
     this.startDictation = this.startDictation.bind(this);
@@ -279,16 +319,32 @@ export abstract class ComposerRuntimeImpl implements ComposerRuntime {
     return core.clearAttachments();
   }
 
-  public send() {
+  public send(options?: SendOptions) {
     const core = this._core.getState();
     if (!core) throw new Error("Composer is not available");
-    core.send();
+    core.send(options);
   }
 
   public cancel() {
     const core = this._core.getState();
     if (!core) throw new Error("Composer is not available");
     core.cancel();
+  }
+
+  public steerQueueItem(queueItemId: string) {
+    this.moveQueueItem(queueItemId, { lane: "steer", insertAfter: null });
+  }
+
+  public moveQueueItem(queueItemId: string, placement: QueuePlacement) {
+    const core = this._core.getState();
+    if (!core) throw new Error("Composer is not available");
+    core.moveQueueItem(queueItemId, placement);
+  }
+
+  public removeQueueItem(queueItemId: string) {
+    const core = this._core.getState();
+    if (!core) throw new Error("Composer is not available");
+    core.removeQueueItem(queueItemId);
   }
 
   public setRole(role: MessageRole) {
@@ -324,19 +380,19 @@ export abstract class ComposerRuntimeImpl implements ComposerRuntime {
     EventSubscriptionSubject<ComposerRuntimeEventType>
   >();
 
-  public unstable_on(
-    event: ComposerRuntimeEventType,
-    callback: () => void,
+  public unstable_on<E extends ComposerRuntimeEventType>(
+    event: E,
+    callback: ComposerRuntimeEventCallback<E>,
   ): Unsubscribe {
     let subject = this._eventSubscriptionSubjects.get(event);
     if (!subject) {
-      subject = new EventSubscriptionSubject({
-        event: event,
+      subject = new EventSubscriptionSubject<ComposerRuntimeEventType>({
+        event,
         binding: this._core,
       });
       this._eventSubscriptionSubjects.set(event, subject);
     }
-    return subject.subscribe(callback);
+    return subject.subscribe(callback as (payload?: unknown) => void);
   }
 
   public abstract getAttachmentByIndex(idx: number): AttachmentRuntime;
@@ -445,10 +501,9 @@ export class EditComposerRuntimeImpl
   }
 
   private _getState;
-  constructor(
-    core: EditComposerRuntimeCoreBinding,
-    private _beginEdit: () => void,
-  ) {
+  private _beginEdit: () => void;
+
+  constructor(core: EditComposerRuntimeCoreBinding, _beginEdit: () => void) {
     const stateBinding = new LazyMemoizeSubject({
       path: core.path,
       getState: () => getEditComposerState(core.getState()),
@@ -460,6 +515,7 @@ export class EditComposerRuntimeImpl
       getState: () => core.getState(),
       subscribe: (callback) => stateBinding.subscribe(callback),
     });
+    this._beginEdit = _beginEdit;
 
     this._getState = stateBinding.getState.bind(stateBinding);
 

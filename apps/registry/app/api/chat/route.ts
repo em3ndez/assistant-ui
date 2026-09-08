@@ -1,10 +1,10 @@
 import { openai } from "@ai-sdk/openai";
-import { frontendTools } from "@assistant-ui/react-ai-sdk";
+import { frontendTools } from "@assistant-ui/ai-sdk";
 import {
   streamText,
   convertToModelMessages,
   type UIMessage,
-  JSONSchema7,
+  type JSONSchema7,
 } from "ai";
 
 export async function POST(req: Request) {
@@ -19,7 +19,7 @@ export async function POST(req: Request) {
   } = await req.json();
 
   const result = streamText({
-    model: openai("gpt-5-nano"),
+    model: openai("gpt-5.6-luna"),
     messages: await convertToModelMessages(messages),
     tools: {
       ...frontendTools(tools ?? {}),

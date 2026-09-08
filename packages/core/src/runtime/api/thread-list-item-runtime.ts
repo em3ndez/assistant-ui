@@ -1,24 +1,50 @@
-import type { Unsubscribe } from "../../types";
+import type { Unsubscribe } from "../../types/unsubscribe";
 import type { SubscribableWithState } from "../../subscribable/subscribable";
 import type { ThreadListItemRuntimePath } from "./paths";
 import type { ThreadListRuntimeCoreBinding } from "./thread-list-runtime";
+import { notifyEventListeners } from "../../utils/notify-event-listeners";
 
-export type ThreadListItemEventType = "switchedTo" | "switchedAway";
+export type ThreadListItemEventPayload = {
+  /**
+   * @deprecated State-derivable. Compare `s.threads.mainThreadId` against the
+   * item's `s.threadListItem.id` via `useAuiState` instead. Kept for backward
+   * compatibility.
+   */
+  switchedTo: Record<string, never>;
+  /**
+   * @deprecated State-derivable. Compare `s.threads.mainThreadId` against the
+   * item's `s.threadListItem.id` via `useAuiState` instead. Kept for backward
+   * compatibility.
+   */
+  switchedAway: Record<string, never>;
+};
+
+export type ThreadListItemEventType = keyof ThreadListItemEventPayload;
+
+export type ThreadListItemEventCallback<E extends ThreadListItemEventType> = (
+  payload: ThreadListItemEventPayload[E],
+) => void;
 
 import type { ThreadListItemState } from "./bindings";
 import type { ThreadListItemStatus } from "../interfaces/thread-list-runtime-core";
 
 export type { ThreadListItemState, ThreadListItemStatus };
 
+export type ThreadListItemGenerateTitleOptions = {
+  /** Marks a generation started by the automatic title trigger. */
+  automatic?: boolean;
+};
+
 export type ThreadListItemRuntime = {
   readonly path: ThreadListItemRuntimePath;
   getState(): ThreadListItemState;
 
   initialize(): Promise<{ remoteId: string; externalId: string | undefined }>;
-  generateTitle(): Promise<void>;
+  generateTitle(options?: ThreadListItemGenerateTitleOptions): Promise<void>;
 
-  switchTo(): Promise<void>;
+  switchTo(options?: { unarchive?: boolean }): Promise<void>;
   rename(newTitle: string): Promise<void>;
+  updateCustom(custom: Record<string, unknown> | undefined): Promise<void>;
   archive(): Promise<void>;
   unarchive(): Promise<void>;
   delete(): Promise<void>;
@@ -27,9 +53,9 @@ export type ThreadListItemRuntime = {
 
   subscribe(callback: () => void): Unsubscribe;
 
-  unstable_on(
-    event: ThreadListItemEventType,
-    callback: () => void,
+  unstable_on<E extends ThreadListItemEventType>(
+    event: E,
+    callback: ThreadListItemEventCallback<E>,
   ): Unsubscribe;
 
   __internal_getRuntime(): ThreadListItemRuntime;
@@ -45,16 +71,22 @@ export class ThreadListItemRuntimeImpl implements ThreadListItemRuntime {
     return this._core.path;
   }
 
+  private _core: ThreadListItemStateBinding;
+  private _threadListBinding: ThreadListRuntimeCoreBinding;
+
   constructor(
-    private _core: ThreadListItemStateBinding,
-    private _threadListBinding: ThreadListRuntimeCoreBinding,
+    _core: ThreadListItemStateBinding,
+    _threadListBinding: ThreadListRuntimeCoreBinding,
   ) {
+    this._core = _core;
+    this._threadListBinding = _threadListBinding;
     this.__internal_bindMethods();
   }
 
   protected __internal_bindMethods() {
     this.switchTo = this.switchTo.bind(this);
     this.rename = this.rename.bind(this);
+    this.updateCustom = this.updateCustom.bind(this);
     this.archive = this.archive.bind(this);
     this.unarchive = this.unarchive.bind(this);
     this.delete = this.delete.bind(this);
@@ -70,15 +102,28 @@ export class ThreadListItemRuntimeImpl implements ThreadListItemRuntime {
     return this._core.getState();
   }
 
-  public switchTo(): Promise<void> {
+  public switchTo(options?: { unarchive?: boolean }): Promise<void> {
     const state = this._core.getState();
-    return this._threadListBinding.switchToThread(state.id);
+    return this._threadListBinding.switchToThread(state.id, options);
   }
 
   public rename(newTitle: string): Promise<void> {
     const state = this._core.getState();
 
     return this._threadListBinding.rename(state.id, newTitle);
+  }
+
+  public updateCustom(
+    custom: Record<string, unknown> | undefined,
+  ): Promise<void> {
+    const state = this._core.getState();
+    if (!this._threadListBinding.updateCustom) {
+      throw new Error(
+        "Thread list runtime does not support updating custom metadata",
+      );
+    }
+
+    return this._threadListBinding.updateCustom(state.id, custom);
   }
 
   public archive(): Promise<void> {
@@ -107,12 +152,17 @@ export class ThreadListItemRuntimeImpl implements ThreadListItemRuntime {
     return this._threadListBinding.initialize(state.id);
   }
 
-  public generateTitle(): Promise<void> {
+  public generateTitle(
+    options?: ThreadListItemGenerateTitleOptions,
+  ): Promise<void> {
     const state = this._core.getState();
-    return this._threadListBinding.generateTitle(state.id);
+    return this._threadListBinding.generateTitle(state.id, options);
   }
 
-  public unstable_on(event: ThreadListItemEventType, callback: () => void) {
+  public unstable_on<E extends ThreadListItemEventType>(
+    event: E,
+    callback: ThreadListItemEventCallback<E>,
+  ) {
     let prevIsMain = this._core.getState().isMain;
     let prevThreadId = this._core.getState().id;
     return this.subscribe(() => {
@@ -125,7 +175,11 @@ export class ThreadListItemRuntimeImpl implements ThreadListItemRuntime {
 
       if (event === "switchedTo" && !newIsMain) return;
       if (event === "switchedAway" && newIsMain) return;
-      callback();
+      notifyEventListeners(
+        [callback as (payload?: unknown) => void],
+        {},
+        `Thread list item "${event}"`,
+      );
     });
   }
 

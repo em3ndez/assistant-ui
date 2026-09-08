@@ -1,8 +1,9 @@
 import {
-  AssistantCloudAuthStrategy,
+  type AssistantCloudAuthStrategy,
   AssistantCloudJWTAuthStrategy,
   AssistantCloudAPIKeyAuthStrategy,
   AssistantCloudAnonymousAuthStrategy,
+  normalizeBaseUrl,
 } from "./AssistantCloudAuthStrategy";
 import type { AssistantCloudRunReport } from "./AssistantCloudRuns";
 
@@ -24,6 +25,7 @@ export type AssistantCloudConfig = (
       authToken: () => Promise<string | null>;
     }
   | {
+      baseUrl?: string;
       apiKey: string;
       userId: string;
       workspaceId: string;
@@ -47,10 +49,13 @@ export type AssistantCloudConfig = (
   telemetry?: boolean | AssistantCloudTelemetryConfig;
 };
 
-class CloudAPIError extends Error {
-  constructor(message: string) {
+export class CloudAPIError extends Error {
+  public readonly status: number;
+
+  constructor(message: string, status: number) {
     super(message);
-    this.name = "APIError";
+    this.status = status;
+    this.name = "CloudAPIError";
   }
 }
 
@@ -67,18 +72,20 @@ export class AssistantCloudAPI {
 
   constructor(config: AssistantCloudConfig) {
     if ("authToken" in config) {
-      this._baseUrl = config.baseUrl;
+      this._baseUrl = normalizeBaseUrl(config.baseUrl);
       this._auth = new AssistantCloudJWTAuthStrategy(config.authToken);
     } else if ("apiKey" in config) {
-      this._baseUrl = "https://backend.assistant-api.com";
+      this._baseUrl = normalizeBaseUrl(
+        config.baseUrl ?? "https://backend.assistant-api.com",
+      );
       this._auth = new AssistantCloudAPIKeyAuthStrategy(
         config.apiKey,
         config.userId,
         config.workspaceId,
       );
     } else if ("anonymous" in config) {
-      this._baseUrl = config.baseUrl;
-      this._auth = new AssistantCloudAnonymousAuthStrategy(config.baseUrl);
+      this._baseUrl = normalizeBaseUrl(config.baseUrl);
+      this._auth = new AssistantCloudAnonymousAuthStrategy(this._baseUrl);
     } else {
       throw new Error(
         "Invalid configuration: Must provide authToken, apiKey, or anonymous configuration",
@@ -87,7 +94,7 @@ export class AssistantCloudAPI {
   }
 
   public async initializeAuth() {
-    return !!this._auth.getAuthHeaders();
+    return !!(await this._auth.getAuthHeaders());
   }
 
   public async makeRawRequest(
@@ -128,15 +135,17 @@ export class AssistantCloudAPI {
 
     if (!response.ok) {
       const text = await response.text();
+      let message: string | undefined;
       try {
         const body = JSON.parse(text);
-        throw new CloudAPIError(body.message);
-      } catch (error) {
-        if (error instanceof CloudAPIError) throw error;
-        throw new Error(
-          `Request failed with status ${response.status}, ${text}`,
-        );
-      }
+        if (typeof body?.message === "string" && body.message.length > 0) {
+          message = body.message;
+        }
+      } catch {}
+      throw new CloudAPIError(
+        message ?? `Request failed with status ${response.status}, ${text}`,
+        response.status,
+      );
     }
 
     return response;
@@ -144,6 +153,15 @@ export class AssistantCloudAPI {
 
   public async makeRequest(endpoint: string, options: MakeRequestOptions = {}) {
     const response = await this.makeRawRequest(endpoint, options);
-    return response.json();
+    if (
+      response.status === 204 ||
+      response.headers.get("content-length") === "0"
+    )
+      return undefined;
+
+    const text = await response.text();
+    if (text.trim() === "") return undefined;
+
+    return JSON.parse(text);
   }
 }

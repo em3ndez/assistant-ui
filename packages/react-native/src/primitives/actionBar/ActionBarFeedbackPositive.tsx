@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import { Pressable, type PressableProps } from "react-native";
-import { useActionBarFeedbackPositive } from "../../primitive-hooks/useActionBarFeedback";
+import { useActionBarFeedbackPositive } from "@assistant-ui/core/react";
 
 export type ActionBarFeedbackPositiveProps = Omit<
   PressableProps,
@@ -16,7 +16,7 @@ export const ActionBarFeedbackPositive = ({
   const { submit, isSubmitted } = useActionBarFeedbackPositive();
 
   return (
-    <Pressable onPress={submit} {...pressableProps}>
+    <Pressable onPress={submit} accessibilityRole="button" {...pressableProps}>
       {typeof children === "function" ? children({ isSubmitted }) : children}
     </Pressable>
   );

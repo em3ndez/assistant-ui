@@ -1,7 +1,7 @@
-import { AssistantStreamChunk } from "../AssistantStreamChunk";
+import type { AssistantStreamChunk } from "../AssistantStreamChunk";
 import { generateId } from "../utils/generateId";
 import { parsePartialJsonObject } from "../../utils/json/parse-partial-json-object";
-import {
+import type {
   AssistantMessage,
   AssistantMessageStatus,
   AssistantMessageTiming,
@@ -11,10 +11,31 @@ import {
   AssistantMessagePart,
   ReasoningPart,
   FilePart,
+  DataPart,
 } from "../utils/types";
-import { ObjectStreamAccumulator } from "../object/ObjectStreamAccumulator";
-import { ReadonlyJSONValue } from "../../utils";
+import { GorpStreamAccumulator } from "../gorp/GorpStreamAccumulator";
+import type { ReadonlyJSONValue } from "../../utils";
 import { TimingTracker } from "./TimingTracker";
+
+/**
+ * Object spread materializes the deprecated `content` alias into a data
+ * property, so it is redefined after `parts` to keep tracking the replacement.
+ */
+const withParts = (
+  message: AssistantMessage,
+  parts: AssistantMessage["parts"],
+): AssistantMessage => ({
+  ...message,
+  parts,
+  get content() {
+    return this.parts;
+  },
+});
+
+const appendPart = (
+  message: AssistantMessage,
+  part: AssistantMessagePart,
+): AssistantMessage => withParts(message, [...message.parts, part]);
 
 export const createInitialMessage = ({
   unstable_state = null,
@@ -36,36 +57,40 @@ export const createInitialMessage = ({
   },
 });
 
+type WarnOnce = (key: string, message: string) => void;
+
+const MAX_WARNED_KEYS = 16;
+
 const updatePartForPath = (
   message: AssistantMessage,
   chunk: AssistantStreamChunk,
+  warnOnce: WarnOnce,
   updater: (part: AssistantMessagePart) => AssistantMessagePart,
 ): AssistantMessage => {
-  if (message.parts.length === 0) {
-    throw new Error("No parts available to update.");
+  const part =
+    chunk.path.length === 1 ? message.parts[chunk.path[0]!] : undefined;
+  if (part === undefined) {
+    warnOnce(
+      `no-part:${chunk.type}`,
+      `Dropped ${chunk.type} chunk: no part at path [${chunk.path.join(", ")}]`,
+    );
+    return message;
   }
 
-  if (chunk.path.length !== 1)
-    throw new Error("Nested paths are not supported yet.");
-
   const partIndex = chunk.path[0]!;
-  const updatedPart = updater(message.parts[partIndex]!);
-  return {
-    ...message,
-    parts: [
-      ...message.parts.slice(0, partIndex),
-      updatedPart,
-      ...message.parts.slice(partIndex + 1),
-    ],
-    get content() {
-      return this.parts;
-    },
-  };
+  const updatedPart = updater(part);
+  if (updatedPart === part) return message;
+  return withParts(message, [
+    ...message.parts.slice(0, partIndex),
+    updatedPart,
+    ...message.parts.slice(partIndex + 1),
+  ]);
 };
 
 const handlePartStart = (
   message: AssistantMessage,
   chunk: AssistantStreamChunk & { readonly type: "part-start" },
+  warnOnce: WarnOnce,
 ): AssistantMessage => {
   const partInit = chunk.part;
   if (partInit.type === "text" || partInit.type === "reasoning") {
@@ -73,15 +98,13 @@ const handlePartStart = (
       type: partInit.type,
       text: "",
       status: { type: "running" },
+      ...(partInit.type === "reasoning" &&
+      partInit.unstable_summary !== undefined
+        ? { unstable_summary: partInit.unstable_summary }
+        : undefined),
       ...(partInit.parentId && { parentId: partInit.parentId }),
     };
-    return {
-      ...message,
-      parts: [...message.parts, newTextPart],
-      get content() {
-        return this.parts;
-      },
-    };
+    return appendPart(message, newTextPart);
   } else if (partInit.type === "tool-call") {
     const newToolCallPart: ToolCallPart = {
       type: "tool-call",
@@ -91,15 +114,10 @@ const handlePartStart = (
       toolName: partInit.toolName,
       argsText: "",
       args: {},
+      timing: { startedAt: Date.now() },
       ...(partInit.parentId && { parentId: partInit.parentId }),
     };
-    return {
-      ...message,
-      parts: [...message.parts, newToolCallPart],
-      get content() {
-        return this.parts;
-      },
-    };
+    return appendPart(message, newToolCallPart);
   } else if (partInit.type === "source") {
     const newSourcePart: SourcePart = {
       type: "source",
@@ -109,28 +127,36 @@ const handlePartStart = (
       ...(partInit.title ? { title: partInit.title } : undefined),
       ...(partInit.parentId && { parentId: partInit.parentId }),
     };
-    return {
-      ...message,
-      parts: [...message.parts, newSourcePart],
-      get content() {
-        return this.parts;
-      },
-    };
+    return appendPart(message, newSourcePart);
   } else if (partInit.type === "file") {
     const newFilePart: FilePart = {
       type: "file",
       mimeType: partInit.mimeType,
       data: partInit.data,
+      ...(partInit.parentId && { parentId: partInit.parentId }),
     };
-    return {
-      ...message,
-      parts: [...message.parts, newFilePart],
-      get content() {
-        return this.parts;
-      },
+    return appendPart(message, newFilePart);
+  } else if (partInit.type === "data") {
+    const newDataPart: DataPart = {
+      type: "data",
+      name: partInit.name,
+      data: partInit.data,
+      ...(partInit.parentId && { parentId: partInit.parentId }),
     };
+    return appendPart(message, newDataPart);
   } else {
-    throw new Error(`Unsupported part type: ${partInit.type}`);
+    const unsupportedType = String((partInit as { type?: unknown }).type);
+    warnOnce(
+      `unsupported-part-start:${unsupportedType}`,
+      `Unsupported part-start type ${unsupportedType}: inserting an empty reasoning part to preserve part indices`,
+    );
+    // reasoning rather than a data sentinel: auiV0Encode rejects data parts, so a data placeholder would fail cloud persistence
+    const placeholderPart: ReasoningPart = {
+      type: "reasoning",
+      text: "",
+      status: { type: "running" },
+    };
+    return appendPart(message, placeholderPart);
   }
 };
 
@@ -139,14 +165,19 @@ const handleToolCallArgsTextFinish = (
   chunk: AssistantStreamChunk & {
     readonly type: "tool-call-args-text-finish";
   },
+  warnOnce: WarnOnce,
 ): AssistantMessage => {
-  return updatePartForPath(message, chunk, (part) => {
+  return updatePartForPath(message, chunk, warnOnce, (part) => {
     if (part.type !== "tool-call") {
-      throw new Error("Last is not a tool call");
+      warnOnce(
+        "wrong-part:tool-call-args-text-finish",
+        "Dropped tool-call-args-text-finish chunk: part is not a tool-call",
+      );
+      return part;
     }
 
     // TODO this should never be hit; this happens if args-text-finish is emitted after result
-    if (part.state !== "partial-call") return part;
+    if (part.state !== "partial-call") return { ...part };
     // throw new Error("Last is not a partial call");
 
     return {
@@ -159,8 +190,9 @@ const handleToolCallArgsTextFinish = (
 const handlePartFinish = (
   message: AssistantMessage,
   chunk: AssistantStreamChunk & { readonly type: "part-finish" },
+  warnOnce: WarnOnce,
 ): AssistantMessage => {
-  return updatePartForPath(message, chunk, (part) => ({
+  return updatePartForPath(message, chunk, warnOnce, (part) => ({
     ...part,
     status: { type: "complete", reason: "unknown" },
   }));
@@ -169,8 +201,9 @@ const handlePartFinish = (
 const handleTextDelta = (
   message: AssistantMessage,
   chunk: AssistantStreamChunk & { type: "text-delta" },
+  warnOnce: WarnOnce,
 ): AssistantMessage => {
-  return updatePartForPath(message, chunk, (part) => {
+  return updatePartForPath(message, chunk, warnOnce, (part) => {
     if (part.type === "text" || part.type === "reasoning") {
       return { ...part, text: part.text + chunk.textDelta };
     } else if (part.type === "tool-call") {
@@ -181,9 +214,11 @@ const handleTextDelta = (
 
       return { ...part, argsText: newArgsText, args: newArgs };
     } else {
-      throw new Error(
-        "text-delta received but part is neither text nor tool-call",
+      warnOnce(
+        "wrong-part:text-delta",
+        "Dropped text-delta chunk: part is neither text nor tool-call",
       );
+      return part;
     }
   });
 };
@@ -191,19 +226,36 @@ const handleTextDelta = (
 const handleResult = (
   message: AssistantMessage,
   chunk: AssistantStreamChunk & { type: "result" },
+  warnOnce: WarnOnce,
 ): AssistantMessage => {
-  return updatePartForPath(message, chunk, (part) => {
+  return updatePartForPath(message, chunk, warnOnce, (part) => {
     if (part.type === "tool-call") {
       return {
         ...part,
         state: "result",
+        ...(part.timing !== undefined
+          ? {
+              timing: {
+                ...part.timing,
+                completedAt: part.timing.completedAt ?? Date.now(),
+              },
+            }
+          : {}),
         ...(chunk.artifact !== undefined ? { artifact: chunk.artifact } : {}),
         result: chunk.result,
         isError: chunk.isError ?? false,
+        ...(chunk.modelContent !== undefined
+          ? { modelContent: chunk.modelContent }
+          : {}),
+        ...(chunk.messages !== undefined ? { messages: chunk.messages } : {}),
         status: { type: "complete", reason: "stop" },
       };
     } else {
-      throw new Error("Result chunk received but part is not a tool-call");
+      warnOnce(
+        "wrong-part:result",
+        "Dropped result chunk: part is not a tool-call",
+      );
+      return part;
     }
   });
 };
@@ -335,17 +387,31 @@ const handleErrorChunk = (
   message: AssistantMessage,
   chunk: AssistantStreamChunk & { type: "error" },
 ): AssistantMessage => {
+  const severity =
+    chunk.severity === "critical" ||
+    chunk.severity === "warning" ||
+    chunk.severity === "info"
+      ? chunk.severity
+      : undefined;
   return {
     ...message,
-    status: { type: "incomplete", reason: "error", error: chunk.error },
+    status: {
+      type: "incomplete",
+      reason: "error",
+      error: {
+        code: chunk.code ?? "unknown",
+        message: chunk.error ?? "unknown error",
+        ...(severity !== undefined && { severity }),
+      },
+    },
   };
 };
 
 const handleUpdateState = (
   message: AssistantMessage,
   chunk: AssistantStreamChunk & { type: "update-state" },
+  acc: GorpStreamAccumulator,
 ): AssistantMessage => {
-  const acc = new ObjectStreamAccumulator(message.metadata.unstable_state);
   acc.append(chunk.operations);
 
   return {
@@ -401,13 +467,22 @@ export class AssistantMessageAccumulator extends TransformStream<
     initialMessage,
     throttle,
     onError,
+    strict = true,
   }: {
     initialMessage?: AssistantMessage;
     throttle?: boolean;
     onError?: (error: string) => void;
+    strict?: boolean | undefined;
   } = {}) {
     let message = initialMessage ?? createInitialMessage();
+    let stateAccumulator: GorpStreamAccumulator | undefined;
     const tracker = new TimingTracker();
+    const warnedKeys = new Set<string>();
+    const warnOnce: WarnOnce = (key, warning) => {
+      if (warnedKeys.has(key) || warnedKeys.size >= MAX_WARNED_KEYS) return;
+      warnedKeys.add(key);
+      console.warn(warning);
+    };
     let controller:
       | TransformStreamDefaultController<AssistantMessage>
       | undefined;
@@ -427,26 +502,28 @@ export class AssistantMessageAccumulator extends TransformStream<
         const type = chunk.type;
         switch (type) {
           case "part-start":
-            message = handlePartStart(message, chunk);
+            message = handlePartStart(message, chunk, warnOnce);
             if (chunk.part.type === "tool-call") {
               tracker.recordToolCallStart(chunk.part.toolCallId);
             }
             break;
 
           case "tool-call-args-text-finish":
-            message = handleToolCallArgsTextFinish(message, chunk);
+            message = handleToolCallArgsTextFinish(message, chunk, warnOnce);
             break;
 
           case "part-finish":
-            message = handlePartFinish(message, chunk);
+            message = handlePartFinish(message, chunk, warnOnce);
             break;
 
-          case "text-delta":
-            message = handleTextDelta(message, chunk);
-            tracker.recordFirstToken();
+          case "text-delta": {
+            const next = handleTextDelta(message, chunk, warnOnce);
+            if (next !== message) tracker.recordFirstToken();
+            message = next;
             break;
+          }
           case "result":
-            message = handleResult(message, chunk);
+            message = handleResult(message, chunk, warnOnce);
             break;
           case "message-finish":
             message = handleMessageFinish(message, chunk);
@@ -468,7 +545,11 @@ export class AssistantMessageAccumulator extends TransformStream<
             onError?.(chunk.error);
             break;
           case "update-state":
-            message = handleUpdateState(message, chunk);
+            stateAccumulator ??= new GorpStreamAccumulator(
+              message.metadata.unstable_state,
+              { strict },
+            );
+            message = handleUpdateState(message, chunk, stateAccumulator);
             break;
           default: {
             const unhandledType: never = type;

@@ -13,7 +13,7 @@ function encode({ id, ...rest }: UIMessage): ReadonlyJSONObject {
   return rest as ReadonlyJSONObject;
 }
 
-// Intentionally duplicated in cloud-ai-sdk and react-ai-sdk.
+// Intentionally duplicated in cloud-ai-sdk and ai-sdk.
 // We keep this local to avoid introducing cross-package coupling for a small adapter.
 // If behavior changes, update both adapters and their contract tests together.
 const aiSdkFormatAdapter: MessageFormatAdapter<UIMessage, ReadonlyJSONObject> =
@@ -35,10 +35,13 @@ export class MessagePersistence {
   private persistenceByThread = new Map<string, CloudMessagePersistence>();
   private formattedByThread = new Map<string, FormattedPersistence>();
 
-  constructor(
-    private cloud: AssistantCloud,
-    private onError: (err: unknown) => void,
-  ) {}
+  private cloud: AssistantCloud;
+  private onError: (err: unknown) => void;
+
+  constructor(cloud: AssistantCloud, onError: (err: unknown) => void) {
+    this.cloud = cloud;
+    this.onError = onError;
+  }
 
   private getPersistence(threadId: string): CloudMessagePersistence {
     const existing = this.persistenceByThread.get(threadId);

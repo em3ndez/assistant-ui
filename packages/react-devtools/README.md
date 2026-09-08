@@ -1,65 +1,47 @@
-# @assistant-ui/react-devtools
+# `@assistant-ui/react-devtools`
 
-React-first development tools for assistant-ui components. This package ships the reusable React helpers, runtime adapters, and UI necessary to embed the DevTools experience in any host application.
-
-## Features
-
-- **Component Library**: React components for debugging assistant-ui experiences
-- **Event Logging**: Track and inspect assistant-ui events and state changes
-- **Context Viewer**: View Assistant API context and state in real-time
-- **Embeddable Host**: Frame bridges that power custom hosts, including the Chrome extension
+React DevTools UI for `@assistant-ui/react`. Embed an event log, context viewer, and runtime inspector in any host application.
 
 ## Installation
-
-### As React Component Library
 
 ```bash
 npm install @assistant-ui/react-devtools
 ```
 
-### As Chrome Extension
-
-See `apps/devtools-extension` for the standalone Chrome extension source and build scripts (`pnpm --filter @assistant-ui/devtools-extension run build`).
-
 ## Usage
 
-### React Components
+Drop `DevToolsModal` inside your `AssistantRuntimeProvider`. It renders a floating launcher and an inline panel (isolated in a shadow root), and is a no-op in production builds.
 
 ```tsx
-import { DevToolsUI, DevToolsModal } from '@assistant-ui/react-devtools';
+import { AssistantRuntimeProvider } from "@assistant-ui/react";
+import { DevToolsModal } from "@assistant-ui/react-devtools";
 
-// Use the full DevTools UI
-<DevToolsUI />
-
-// Or use as a modal overlay
-<DevToolsModal />
+export function App() {
+  return (
+    <AssistantRuntimeProvider runtime={runtime}>
+      <DevToolsModal />
+      {/* ...your assistant-ui... */}
+    </AssistantRuntimeProvider>
+  );
+}
 ```
 
-### Chrome Extension
+## Custom tabs
 
-The Chrome extension now lives under `apps/devtools-extension` as a separate workspace app. It consumes this package at build time to reuse the shared runtime and UI.
+The panel is extensible through a plugin registry. Each plugin receives the inspected instance's projected data and renders a tab body.
 
-## Build Scripts
+```tsx
+import { createDevToolsPlugin, DevToolsModal } from "@assistant-ui/react-devtools";
 
-- `npm run build` - Build the React component library
-- `npm run build:lib` - Alias for `build`
-- `npm run dev` - Development build with watch mode
+const myTab = createDevToolsPlugin({
+  id: "my-tab",
+  label: "My tab",
+  Component: ({ data }) => <pre>{JSON.stringify(data.state, null, 2)}</pre>,
+});
 
-## Package Structure
-
-```
-packages/react-devtools/
-├── src/                     # React component library source
-│   ├── DevToolsHooks.ts     # Core devtools functionality
-│   ├── DevToolsModal.tsx    # Modal wrapper component (iframe host)
-│   └── index.ts             # Main exports
-└── scripts/                 # Build scripts
+<DevToolsModal plugins={[myTab]} />;
 ```
 
-## Development
+## Documentation
 
-The devtools package builds with `@assistant-ui/x-buildutils` to transpile the TypeScript sources that power the React helpers and adapters consumed across the workspace.
-
-## License
-
-MIT
+Full reference at [assistant-ui.com/docs/devtools](https://www.assistant-ui.com/docs/devtools).

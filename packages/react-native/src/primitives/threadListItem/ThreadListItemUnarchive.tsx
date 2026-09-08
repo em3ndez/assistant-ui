@@ -1,23 +1,25 @@
-import { useCallback, type ReactNode } from "react";
 import { Pressable, type PressableProps } from "react-native";
-import { useAui } from "@assistant-ui/store";
+import { useThreadListItemUnarchive } from "@assistant-ui/core/react";
 
-export type ThreadListItemUnarchiveProps = Omit<PressableProps, "onPress"> & {
-  children: ReactNode;
+export type ThreadListItemUnarchiveProps = Omit<
+  PressableProps,
+  "onPress" | "children"
+> & {
+  children: PressableProps["children"];
 };
 
 export const ThreadListItemUnarchive = ({
   children,
   ...pressableProps
 }: ThreadListItemUnarchiveProps) => {
-  const aui = useAui();
-
-  const onPress = useCallback(() => {
-    aui.threadListItem().unarchive();
-  }, [aui]);
+  const { unarchive } = useThreadListItemUnarchive();
 
   return (
-    <Pressable onPress={onPress} {...pressableProps}>
+    <Pressable
+      onPress={unarchive}
+      accessibilityRole="button"
+      {...pressableProps}
+    >
       {children}
     </Pressable>
   );

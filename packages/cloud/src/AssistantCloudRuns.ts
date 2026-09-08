@@ -1,5 +1,11 @@
-import { AssistantCloudAPI } from "./AssistantCloudAPI";
+import type { AssistantCloudAPI } from "./AssistantCloudAPI";
+import type { AssistantCloudRunReportToolCall } from "./runTelemetry";
 import { AssistantStream, PlainTextDecoder } from "assistant-stream";
+import {
+  CloudResponseError,
+  readCloudRecord,
+  readCloudString,
+} from "./cloudResponse";
 
 type AssistantCloudRunsStreamBody = {
   thread_id: string;
@@ -14,45 +20,13 @@ export type AssistantCloudRunReport = {
   thread_id: string;
   status: "completed" | "incomplete" | "error";
   total_steps?: number;
-  tool_calls?: {
-    tool_name: string;
-    tool_call_id: string;
-    tool_args?: string;
-    tool_result?: string;
-    tool_source?: "mcp" | "frontend" | "backend";
-    start_ms?: number;
-    end_ms?: number;
-    sampling_calls?: {
-      model_id?: string;
-      input_tokens?: number;
-      output_tokens?: number;
-      reasoning_tokens?: number;
-      cached_input_tokens?: number;
-      duration_ms?: number;
-    }[];
-  }[];
+  tool_calls?: AssistantCloudRunReportToolCall[];
   steps?: {
     input_tokens?: number;
     output_tokens?: number;
     reasoning_tokens?: number;
     cached_input_tokens?: number;
-    tool_calls?: {
-      tool_name: string;
-      tool_call_id: string;
-      tool_args?: string;
-      tool_result?: string;
-      tool_source?: "mcp" | "frontend" | "backend";
-      start_ms?: number;
-      end_ms?: number;
-      sampling_calls?: {
-        model_id?: string;
-        input_tokens?: number;
-        output_tokens?: number;
-        reasoning_tokens?: number;
-        cached_input_tokens?: number;
-        duration_ms?: number;
-      }[];
-    }[];
+    tool_calls?: AssistantCloudRunReportToolCall[];
     start_ms?: number;
     end_ms?: number;
   }[];
@@ -68,7 +42,11 @@ export type AssistantCloudRunReport = {
 };
 
 export class AssistantCloudRuns {
-  constructor(private cloud: AssistantCloudAPI) {}
+  private cloud: AssistantCloudAPI;
+
+  constructor(cloud: AssistantCloudAPI) {
+    this.cloud = cloud;
+  }
 
   public __internal_getAssistantOptions(assistantId: string) {
     return {
@@ -99,12 +77,40 @@ export class AssistantCloudRuns {
       },
       body,
     });
+
+    if (!response.body) {
+      throw new CloudResponseError(
+        'Invalid Assistant Cloud response for "run stream": expected a response body',
+      );
+    }
+
+    const receivedContentType = response.headers.get("content-type");
+    const contentType = receivedContentType
+      ?.split(";", 1)[0]
+      ?.trim()
+      .toLowerCase();
+    if (contentType !== "text/plain") {
+      await response.body.cancel().catch(() => undefined);
+      throw new CloudResponseError(
+        `Invalid Assistant Cloud response for "run stream": expected a "text/plain" content type, received ${
+          receivedContentType
+            ? `"${receivedContentType}"`
+            : "no Content-Type header"
+        }`,
+      );
+    }
+
     return AssistantStream.fromResponse(response, new PlainTextDecoder());
   }
 
   public async report(
     body: AssistantCloudRunReport,
   ): Promise<{ run_id: string }> {
-    return this.cloud.makeRequest("/runs", { method: "POST", body });
+    const response = readCloudRecord(
+      await this.cloud.makeRequest("/runs", { method: "POST", body }),
+      "run report response",
+    );
+
+    return { run_id: readCloudString(response.run_id, "run_id") };
   }
 }

@@ -1,4 +1,7 @@
-import type { AssistantCloud } from "assistant-cloud";
+import {
+  generateThreadTitle as generateCloudThreadTitle,
+  type AssistantCloud,
+} from "assistant-cloud";
 import { MESSAGE_FORMAT } from "../chat/MessagePersistence";
 
 export async function generateThreadTitle(
@@ -16,19 +19,21 @@ export async function generateThreadTitle(
     return messages;
   };
 
-  const messages = await loadMessages();
+  // The list endpoint returns newest-first; the title model needs the
+  // conversation in chronological order.
+  const messages = (await loadMessages()).slice().reverse();
   if (messages.length === 0) return null;
 
   const aiSdkMessages = messages.filter(
     (msg) =>
       msg.format === MESSAGE_FORMAT ||
-      (msg.content && Array.isArray(msg.content["parts"])),
+      (msg.content && Array.isArray(msg.content.parts)),
   );
   if (aiSdkMessages.length === 0) return null;
 
   const convertedMessages = aiSdkMessages
     .map((msg) => {
-      const parts = msg.content["parts"] as
+      const parts = msg.content.parts as
         | Array<{ type: string; text?: string }>
         | undefined;
       if (!parts) return null;
@@ -37,7 +42,7 @@ export async function generateThreadTitle(
         .map((part) => ({ type: "text" as const, text: part.text! }));
       if (textParts.length === 0) return null;
       return {
-        role: msg.content["role"] as string,
+        role: msg.content.role as string,
         content: textParts,
       };
     })
@@ -45,29 +50,8 @@ export async function generateThreadTitle(
 
   if (convertedMessages.length === 0) return null;
 
-  const stream = await cloud.runs.stream({
-    thread_id: threadId,
-    assistant_id: "system/thread_title",
+  return generateCloudThreadTitle(cloud, {
+    threadId,
     messages: convertedMessages,
   });
-
-  let title = "";
-  const reader = stream.getReader();
-  try {
-    while (true) {
-      const { done, value: chunk } = await reader.read();
-      if (done) break;
-      if (chunk.type === "text-delta") {
-        title += chunk.textDelta;
-      }
-    }
-  } finally {
-    reader.releaseLock();
-  }
-
-  if (title) {
-    await cloud.threads.update(threadId, { title });
-  }
-
-  return title || null;
 }

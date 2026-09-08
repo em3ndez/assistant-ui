@@ -1,4 +1,4 @@
-import { useCallbackRef } from "@radix-ui/react-use-callback-ref";
+import { useCallbackRef } from "radix-ui/internal";
 import { useCallback } from "react";
 import { useManagedRef } from "./useManagedRef";
 
@@ -13,8 +13,7 @@ export const useOnResizeContent = (callback: () => void) => {
 
       const mutationObserver = new MutationObserver((mutations) => {
         // Filter out style-only attribute mutations to prevent feedback loops
-        // with components like ThreadViewportSlack that write styles in response
-        // to viewport changes
+        // with code paths that write styles in response to viewport changes.
         const hasRelevantMutation = mutations.some(
           (m) => m.type !== "attributes" || m.attributeName !== "style",
         );

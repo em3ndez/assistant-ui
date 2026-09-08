@@ -6,13 +6,11 @@ import {
   metaSchema,
 } from "fumadocs-mdx/config";
 import { rehypeCodeDefaultOptions } from "fumadocs-core/mdx-plugins";
-import { transformerTwoslash } from "fumadocs-twoslash";
 import { transformerMetaHighlight } from "@shikijs/transformers";
 import { z } from "zod";
-import { remarkMermaid } from "@theguild/remark-mermaid";
-import { createFileSystemTypesCache } from "fumadocs-twoslash/cache-fs";
 import lastModified from "fumadocs-mdx/plugins/last-modified";
 import type { ShikiTransformer } from "shiki";
+import { remarkMermaid } from "./lib/remark-mermaid";
 
 function transformerLineNumbers(): ShikiTransformer {
   return {
@@ -22,6 +20,12 @@ function transformerLineNumbers(): ShikiTransformer {
     },
   };
 }
+
+// Platform a doc page or section applies to. Used by the docs sidebar to
+// filter content based on the user's selected platform in the header dropdown.
+// Pages / folders with no `platforms` field are universal.
+// fumadocs-mdx forbids non-collection exports here, so this is local-only.
+const platformSchema = z.enum(["react", "rn", "ink", "vue"]);
 
 export const docs = defineDocs({
   docs: {
@@ -34,14 +38,15 @@ export const docs = defineDocs({
           }),
         )
         .optional(),
+      platforms: z.array(platformSchema).optional(),
     }),
-    postprocess: {
-      includeProcessedMarkdown: true,
-    },
+    async: true,
   },
   meta: {
     schema: metaSchema.extend({
       description: z.string().optional(),
+      overview: z.string().optional(),
+      platforms: z.array(platformSchema).optional(),
     }),
   },
 });
@@ -50,9 +55,7 @@ export const tapDocs = defineDocs({
   dir: "content/tap-docs",
   docs: {
     schema: frontmatterSchema,
-    postprocess: {
-      includeProcessedMarkdown: true,
-    },
+    async: true,
   },
   meta: {
     schema: metaSchema.extend({
@@ -65,6 +68,30 @@ export const examples = defineCollections({
   type: "doc",
   dir: "content/examples",
   schema: frontmatterSchema,
+  async: true,
+});
+
+export const elements = defineCollections({
+  type: "doc",
+  dir: "content/elements",
+  schema: frontmatterSchema,
+  async: true,
+});
+
+export const design = defineCollections({
+  type: "doc",
+  dir: "content/design",
+  schema: frontmatterSchema.extend({
+    links: z
+      .array(
+        z.object({
+          label: z.string(),
+          url: z.string(),
+        }),
+      )
+      .optional(),
+  }),
+  async: true,
 });
 
 export const blog = defineCollections({
@@ -72,8 +99,12 @@ export const blog = defineCollections({
   dir: "content/blog",
   schema: frontmatterSchema.extend({
     author: z.string(),
-    date: z.date().optional(),
+    date: z.coerce.date().optional(),
+    externalUrl: z.string().url().optional(),
   }),
+  postprocess: {
+    includeProcessedMarkdown: true,
+  },
 });
 
 export const careers = defineCollections({
@@ -103,17 +134,6 @@ export default defineConfig({
         ...(rehypeCodeDefaultOptions.transformers ?? []),
         transformerLineNumbers(),
         transformerMetaHighlight(),
-        transformerTwoslash({
-          typesCache: createFileSystemTypesCache(),
-          twoslashOptions: {
-            compilerOptions: {
-              jsx: 1, // JSX preserve
-              paths: {
-                "@/*": ["./*"],
-              },
-            },
-          },
-        }),
       ],
     },
   },

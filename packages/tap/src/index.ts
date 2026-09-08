@@ -1,39 +1,23 @@
 export { resource } from "./core/resource";
 export { withKey } from "./core/withKey";
 
-// primitive hooks
-export { tapState } from "./hooks/tap-state";
-export { tapReducer, tapReducerWithDerivedState } from "./hooks/tap-reducer";
-export { tapEffect } from "./hooks/tap-effect";
-
-// utility hooks
-export { tapRef } from "./hooks/tap-ref";
-export { tapConst } from "./hooks/tap-const";
-export { tapMemo } from "./hooks/tap-memo";
-export { tapCallback } from "./hooks/tap-callback";
-export { tapEffectEvent } from "./hooks/tap-effect-event";
-
-// resources
-export { tapResource } from "./hooks/tap-resource";
-export { tapResources } from "./hooks/tap-resources";
-
-// subscribable
-export { tapResourceRoot } from "./tapResourceRoot";
-
 // imperative
-export { createResourceRoot } from "./core/createResourceRoot";
-export { flushResourcesSync } from "./core/scheduler";
+export { createTapRoot } from "./core/createTapRoot";
+export { flushTapSync } from "./core/scheduler";
 
 // context
-export {
-  createResourceContext,
-  tap,
-  withContextProvider,
-} from "./core/context";
+export { useContextProvider } from "./core/context";
+
+// hooks
+import { useMemoCache as useMemoCacheInternal } from "./react-hooks/useMemoCache";
+/**
+ * @deprecated Internal API kept for older @assistant-ui/store versions; do not use.
+ */
+export const useMemoCache = useMemoCacheInternal;
+export { useResource } from "./hooks/useResource";
+export { useResources } from "./hooks/useResources";
+export { useTapRoot } from "./hooks/useTapRoot";
+export { useTapHost } from "./hooks/useTapHost";
 
 // types
-export type {
-  Resource,
-  ContravariantResource,
-  ResourceElement,
-} from "./core/types";
+export type { Resource, ResourceElement } from "./core/types";

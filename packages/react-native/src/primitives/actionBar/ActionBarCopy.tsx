@@ -3,7 +3,7 @@ import { Pressable, type PressableProps } from "react-native";
 import {
   useActionBarCopy,
   type UseActionBarCopyOptions,
-} from "../../primitive-hooks/useActionBarCopy";
+} from "@assistant-ui/core/react";
 
 export type ActionBarCopyProps = Omit<PressableProps, "onPress" | "children"> &
   UseActionBarCopyOptions & {
@@ -26,6 +26,7 @@ export const ActionBarCopy = ({
     <Pressable
       onPress={copy}
       disabled={disabledProp ?? disabled}
+      accessibilityRole="button"
       {...pressableProps}
     >
       {typeof children === "function" ? children({ isCopied }) : children}

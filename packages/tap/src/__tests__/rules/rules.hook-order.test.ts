@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { tapEffect } from "../../hooks/tap-effect";
-import { tapState } from "../../hooks/tap-state";
+import { useEffect } from "../../react-hooks/useEffect";
+import { useState } from "../../react-hooks/useState";
 import { createTestResource, renderTest } from "../test-utils";
 import {
   renderResourceFiber,
@@ -13,45 +13,45 @@ describe("Rules of Hooks - Hook Order", () => {
 
     const resource = createTestResource(() => {
       if (condition) {
-        tapState(1);
-        tapEffect(() => {}, []);
+        useState(1);
+        useEffect(() => {}, []);
       } else {
-        tapEffect(() => {}, []);
-        tapState(1);
+        useEffect(() => {}, []);
+        useState(1);
       }
       return null;
     });
 
     // First render establishes order
-    renderTest(resource, undefined);
+    renderTest(resource);
 
     // Change condition
     condition = false;
 
     // Second render with different order should throw
-    expect(() => renderResourceFiber(resource, undefined)).toThrow(
+    expect(() => renderResourceFiber(resource, [])).toThrow(
       "Hook order changed between renders",
     );
   });
 
   it("should throw when hook types change between renders", () => {
-    let useEffect = false;
+    let addEffect = false;
 
     const resource = createTestResource(() => {
-      if (useEffect) {
-        tapEffect(() => {});
+      if (addEffect) {
+        useEffect(() => {});
       } else {
-        tapState(0);
+        useState(0);
       }
       return null;
     });
 
-    renderTest(resource, undefined);
+    renderTest(resource);
 
     // Change to use different hook type
-    useEffect = true;
+    addEffect = true;
 
-    expect(() => renderResourceFiber(resource, undefined)).toThrow(
+    expect(() => renderResourceFiber(resource, [])).toThrow(
       "Hook order changed between renders",
     );
   });
@@ -60,23 +60,23 @@ describe("Rules of Hooks - Hook Order", () => {
     let condition = true;
 
     const resource = createTestResource(() => {
-      tapState(1);
+      useState(1);
 
       if (condition) {
-        tapState(2); // Conditional hook
+        useState(2); // Conditional hook
       }
 
-      tapState(3);
+      useState(3);
       return null;
     });
 
-    renderTest(resource, undefined);
+    renderTest(resource);
 
     // Change condition
     condition = false;
 
     // Should throw because hook count changed
-    expect(() => renderResourceFiber(resource, undefined)).toThrow(
+    expect(() => renderResourceFiber(resource, [])).toThrow(
       "Rendered 2 hooks but expected 3",
     );
   });
@@ -86,18 +86,18 @@ describe("Rules of Hooks - Hook Order", () => {
 
     const resource = createTestResource(() => {
       const states = items.map((item) => {
-        const [value] = tapState(item);
+        const [value] = useState(item);
         return value;
       });
 
       return states;
     });
 
-    const result = renderTest(resource, undefined);
-    expect(result).toEqual([1, 2, 3]);
+    const value = renderTest(resource);
+    expect(value).toEqual([1, 2, 3]);
 
     // Re-render should work fine
-    expect(() => renderResourceFiber(resource, undefined)).not.toThrow();
+    expect(() => renderResourceFiber(resource, [])).not.toThrow();
   });
 
   it("should throw when hooks in loops have inconsistent count", () => {
@@ -105,80 +105,80 @@ describe("Rules of Hooks - Hook Order", () => {
 
     const resource = createTestResource(() => {
       items.forEach((item) => {
-        tapState(item);
+        useState(item);
       });
       return null;
     });
 
-    renderTest(resource, undefined);
+    renderTest(resource);
 
     // Change array length
     items = [1, 2];
 
-    expect(() => renderResourceFiber(resource, undefined)).toThrow(
+    expect(() => renderResourceFiber(resource, [])).toThrow(
       "Rendered 2 hooks but expected 3",
     );
   });
 
   it("should maintain order with mixed hook types", () => {
     const resource = createTestResource(() => {
-      const [a] = tapState(1);
-      tapEffect(() => {});
-      const [b] = tapState(2);
-      tapEffect(() => {});
-      const [c] = tapState(3);
+      const [a] = useState(1);
+      useEffect(() => {});
+      const [b] = useState(2);
+      useEffect(() => {});
+      const [c] = useState(3);
 
       return { a, b, c };
     });
 
-    const result = renderTest(resource, undefined);
-    expect(result).toEqual({ a: 1, b: 2, c: 3 });
+    const value = renderTest(resource);
+    expect(value).toEqual({ a: 1, b: 2, c: 3 });
 
     // Re-render should maintain same order
-    const ctx = renderResourceFiber(resource, undefined);
-    expect(() => commitResourceFiber(resource, ctx)).not.toThrow();
+    renderResourceFiber(resource, []);
+    expect(() => commitResourceFiber(resource)).not.toThrow();
   });
 
   it("should detect early return causing different hook counts", () => {
     let shouldReturn = false;
 
     const resource = createTestResource(() => {
-      const [a] = tapState(1);
+      const [a] = useState(1);
 
       if (shouldReturn) {
         return a; // Early return
       }
 
-      const [b] = tapState(2);
+      const [b] = useState(2);
       return a + b;
     });
 
-    const result1 = renderTest(resource, undefined);
+    const result1 = renderTest(resource);
     expect(result1).toBe(3);
 
     // Enable early return
     shouldReturn = true;
 
-    expect(() => renderResourceFiber(resource, undefined)).toThrow(
+    expect(() => renderResourceFiber(resource, [])).toThrow(
       "Rendered 1 hooks but expected 2",
     );
   });
 
   it("should throw on nested hook calls", () => {
     const resource = createTestResource(() => {
-      const [count, setCount] = tapState(0);
+      const [count, setCount] = useState(0);
 
       // This effect contains a hook call, which is invalid
-      tapEffect(() => {
+      useEffect(() => {
         if (count > 0) {
           expect(() => {
-            const [_nested] = tapState(0); // Invalid: hook inside effect
+            const [_nested] = useState(0); // Invalid: hook inside effect
           }).toThrow("No resource fiber available");
         }
       });
 
       // Use an effect to trigger the state change
-      tapEffect(() => {
+      useEffect(() => {
         if (count === 0) {
           setCount(1);
         }
@@ -187,6 +187,6 @@ describe("Rules of Hooks - Hook Order", () => {
       return count;
     });
 
-    renderTest(resource, undefined);
+    renderTest(resource);
   });
 });

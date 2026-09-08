@@ -1,14 +1,15 @@
+import sjson from "secure-json-parse";
 import type { AssistantStreamChunk } from "../../AssistantStreamChunk";
-import type { ToolCallStreamController } from "../../modules/tool-call";
-import type { TextStreamController } from "../../modules/text";
 import { AssistantTransformStream } from "../../utils/stream/AssistantTransformStream";
 import { PipeableTransformStream } from "../../utils/stream/PipeableTransformStream";
-import { LineDecoderStream } from "../../utils/stream/LineDecoderStream";
-import {
-  type UIMessageStreamChunk,
-  type UIMessageStreamDataChunk,
+import { createSSEJsonDecoder } from "../../utils/stream/SSEJson";
+import type {
+  UIMessageStreamChunk,
+  UIMessageStreamDataChunk,
 } from "./chunk-types";
 import { generateId } from "../../utils/generateId";
+import { createToolCallPartRegistry } from "../tool-call-part-registry";
+import { createChunkNormalizer } from "./chunk-normalizer";
 
 export type { UIMessageStreamChunk, UIMessageStreamDataChunk };
 
@@ -20,72 +21,6 @@ export type UIMessageStreamDecoderOptions = {
     transient?: boolean;
   }) => void;
 };
-
-type SSEEvent = {
-  event: string;
-  data: string;
-  id?: string | undefined;
-  retry?: number | undefined;
-};
-
-class SSEEventStream extends TransformStream<string, SSEEvent> {
-  constructor() {
-    let eventBuffer: Partial<SSEEvent> = {};
-    let dataLines: string[] = [];
-
-    super({
-      start() {
-        eventBuffer = {};
-        dataLines = [];
-      },
-      transform(line, controller) {
-        if (line.startsWith(":")) return;
-
-        if (line === "") {
-          if (dataLines.length > 0) {
-            controller.enqueue({
-              event: eventBuffer.event || "message",
-              data: dataLines.join("\n"),
-              id: eventBuffer.id,
-              retry: eventBuffer.retry,
-            });
-          }
-          eventBuffer = {};
-          dataLines = [];
-          return;
-        }
-
-        const [field, ...rest] = line.split(":");
-        const value = rest.join(":").trimStart();
-
-        switch (field) {
-          case "event":
-            eventBuffer.event = value;
-            break;
-          case "data":
-            dataLines.push(value);
-            break;
-          case "id":
-            eventBuffer.id = value;
-            break;
-          case "retry":
-            eventBuffer.retry = Number(value);
-            break;
-        }
-      },
-      flush(controller) {
-        if (dataLines.length > 0) {
-          controller.enqueue({
-            event: eventBuffer.event || "message",
-            data: dataLines.join("\n"),
-            id: eventBuffer.id,
-            retry: eventBuffer.retry,
-          });
-        }
-      },
-    });
-  }
-}
 
 const isDataChunk = (
   chunk: UIMessageStreamChunk,
@@ -100,10 +35,10 @@ export class UIMessageStreamDecoder extends PipeableTransformStream<
 > {
   constructor(options: UIMessageStreamDecoderOptions = {}) {
     super((readable) => {
-      const toolCallControllers = new Map<string, ToolCallStreamController>();
-      let activeToolCallArgsText: TextStreamController | undefined;
+      const toolCallPartRegistry = createToolCallPartRegistry();
+      const normalizer = createChunkNormalizer();
+      let activeToolCallId: string | undefined;
       let currentMessageId: string | undefined;
-      let receivedDone = false;
 
       const transform = new AssistantTransformStream<UIMessageStreamChunk>({
         transform(chunk, controller) {
@@ -176,35 +111,46 @@ export class UIMessageStreamDecoder extends PipeableTransformStream<
               break;
 
             case "tool-call-start": {
-              activeToolCallArgsText?.close();
-              activeToolCallArgsText = undefined;
-
-              if (toolCallControllers.has(chunk.toolCallId)) {
-                throw new Error(
-                  `Encountered duplicate tool call id: ${chunk.toolCallId}`,
+              if (activeToolCallId !== undefined) {
+                toolCallPartRegistry.closeArgsText(
+                  toolCallPartRegistry.get(activeToolCallId),
                 );
+                activeToolCallId = undefined;
               }
 
-              const toolCallController = controller.addToolCallPart({
-                toolCallId: chunk.toolCallId,
-                toolName: chunk.toolName,
-              });
-              toolCallControllers.set(chunk.toolCallId, toolCallController);
-              activeToolCallArgsText = toolCallController.argsText;
+              toolCallPartRegistry.start(chunk.toolCallId, () =>
+                controller.addToolCallPart({
+                  toolCallId: chunk.toolCallId,
+                  toolName: chunk.toolName,
+                }),
+              );
+              activeToolCallId = chunk.toolCallId;
               break;
             }
 
             case "tool-call-delta":
-              activeToolCallArgsText?.append(chunk.argsText);
+              if (activeToolCallId !== undefined) {
+                toolCallPartRegistry.appendArgsText(
+                  toolCallPartRegistry.get(activeToolCallId),
+                  chunk.argsText,
+                );
+              }
               break;
 
             case "tool-call-end":
-              activeToolCallArgsText?.close();
-              activeToolCallArgsText = undefined;
+              if (activeToolCallId !== undefined) {
+                toolCallPartRegistry.closeArgsText(
+                  toolCallPartRegistry.get(activeToolCallId),
+                );
+                activeToolCallId = undefined;
+              }
               break;
 
             case "tool-result": {
-              const toolCallController = toolCallControllers.get(
+              if (chunk.toolCallId === activeToolCallId) {
+                activeToolCallId = undefined;
+              }
+              const toolCallController = toolCallPartRegistry.tryGet(
                 chunk.toolCallId,
               );
               if (!toolCallController) {
@@ -212,9 +158,12 @@ export class UIMessageStreamDecoder extends PipeableTransformStream<
                   `Encountered tool result with unknown id: ${chunk.toolCallId}`,
                 );
               }
-              toolCallController.setResponse({
+              toolCallPartRegistry.setResponse(toolCallController, {
                 result: chunk.result,
                 isError: chunk.isError ?? false,
+                ...(chunk.messages !== undefined
+                  ? { messages: chunk.messages }
+                  : {}),
               });
               break;
             }
@@ -260,41 +209,49 @@ export class UIMessageStreamDecoder extends PipeableTransformStream<
           }
         },
         flush() {
-          activeToolCallArgsText?.close();
-          toolCallControllers.forEach((ctrl) => ctrl.close());
-          toolCallControllers.clear();
+          if (activeToolCallId !== undefined) {
+            toolCallPartRegistry.closeArgsText(
+              toolCallPartRegistry.get(activeToolCallId),
+            );
+          }
+          toolCallPartRegistry.closeAll();
         },
       });
 
-      return readable
-        .pipeThrough(new TextDecoderStream())
-        .pipeThrough(new LineDecoderStream())
-        .pipeThrough(new SSEEventStream())
-        .pipeThrough(
-          new TransformStream<SSEEvent, UIMessageStreamChunk>({
-            transform(event, controller) {
-              if (event.event !== "message") {
-                throw new Error(`Unknown SSE event type: ${event.event}`);
-              }
-
-              if (event.data === "[DONE]") {
-                receivedDone = true;
-                controller.terminate();
-                return;
-              }
-
-              controller.enqueue(JSON.parse(event.data));
-            },
-            flush() {
-              if (!receivedDone) {
-                throw new Error(
-                  "Stream ended abruptly without receiving [DONE] marker",
-                );
-              }
-            },
-          }),
-        )
-        .pipeThrough(transform);
+      return createSSEJsonDecoder<UIMessageStreamChunk>({
+        strict: true,
+        parse(data, controller) {
+          let chunk;
+          try {
+            chunk = sjson.parse(data);
+          } catch {
+            chunk = undefined;
+          }
+          if (
+            typeof chunk !== "object" ||
+            chunk === null ||
+            Array.isArray(chunk) ||
+            typeof chunk.type !== "string"
+          ) {
+            console.warn(
+              `Dropped invalid UIMessageStream chunk: ${data.slice(0, 200)}`,
+            );
+            return;
+          }
+          normalizer.normalize(chunk, controller);
+        },
+        done: {
+          marker: "[DONE]",
+          onDone(controller) {
+            normalizer.flush(controller);
+          },
+          onMissing() {
+            throw new Error(
+              "Stream ended abruptly without receiving [DONE] marker",
+            );
+          },
+        },
+      })(readable).pipeThrough(transform);
     });
   }
 }

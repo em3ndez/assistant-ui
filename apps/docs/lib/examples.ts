@@ -14,7 +14,7 @@ const INTERNAL_EXAMPLES: ExampleItem[] = [
     description: "Floating button that opens an AI assistant chat box.",
     link: "/examples/modal",
     githubLink:
-      "https://github.com/assistant-ui/assistant-ui/blob/main/apps/docs/components/assistant-ui/assistant-modal.tsx",
+      "https://github.com/assistant-ui/assistant-ui/blob/main/apps/docs/components/pages/docs/samples/assistant-modal.tsx",
   },
   {
     title: "Form Filling Co-Pilot",
@@ -30,7 +30,7 @@ const INTERNAL_EXAMPLES: ExampleItem[] = [
     description: "Customized colors and styles for a ChatGPT look and feel.",
     link: "/examples/chatgpt",
     githubLink:
-      "https://github.com/assistant-ui/assistant-ui/blob/main/apps/docs/components/examples/chatgpt.tsx",
+      "https://github.com/assistant-ui/assistant-ui/blob/main/apps/docs/components/pages/examples/chatgpt.tsx",
   },
   {
     title: "Claude Clone",
@@ -38,7 +38,15 @@ const INTERNAL_EXAMPLES: ExampleItem[] = [
     description: "Customized colors and styles for a Claude look and feel.",
     link: "/examples/claude",
     githubLink:
-      "https://github.com/assistant-ui/assistant-ui/blob/main/apps/docs/components/examples/claude.tsx",
+      "https://github.com/assistant-ui/assistant-ui/blob/main/apps/docs/components/pages/examples/claude.tsx",
+  },
+  {
+    title: "Gemini Clone",
+    image: "/screenshot/examples/gemini.png",
+    description: "Customized colors and styles for a Gemini look and feel.",
+    link: "/examples/gemini",
+    githubLink:
+      "https://github.com/assistant-ui/assistant-ui/blob/main/apps/docs/components/pages/examples/gemini.tsx",
   },
   {
     title: "Grok Clone",
@@ -46,7 +54,7 @@ const INTERNAL_EXAMPLES: ExampleItem[] = [
     description: "Customized colors and styles for a Grok look and feel.",
     link: "/examples/grok",
     githubLink:
-      "https://github.com/assistant-ui/assistant-ui/blob/main/apps/docs/components/examples/grok.tsx",
+      "https://github.com/assistant-ui/assistant-ui/blob/main/apps/docs/components/pages/examples/grok.tsx",
   },
   {
     title: "Perplexity Clone",
@@ -54,7 +62,7 @@ const INTERNAL_EXAMPLES: ExampleItem[] = [
     description: "Customized colors and styles for a Perplexity look and feel.",
     link: "/examples/perplexity",
     githubLink:
-      "https://github.com/assistant-ui/assistant-ui/blob/main/apps/docs/components/examples/perplexity.tsx",
+      "https://github.com/assistant-ui/assistant-ui/blob/main/apps/docs/components/pages/examples/perplexity.tsx",
   },
   {
     title: "AI SDK",
@@ -62,7 +70,7 @@ const INTERNAL_EXAMPLES: ExampleItem[] = [
     description: "Chat persistence with AI SDK.",
     link: "/examples/ai-sdk",
     githubLink:
-      "https://github.com/assistant-ui/assistant-ui/blob/main/apps/docs/components/examples/shadcn.tsx",
+      "https://github.com/assistant-ui/assistant-ui/blob/main/apps/docs/components/pages/examples/base.tsx",
   },
   {
     title: "Mem0 - ChatGPT with memory",
@@ -98,9 +106,34 @@ const INTERNAL_EXAMPLES: ExampleItem[] = [
     githubLink:
       "https://github.com/assistant-ui/assistant-ui/tree/main/examples/with-expo",
   },
+  {
+    title: "Generative UI",
+    image: "/screenshot/examples/generative-ui.png",
+    description:
+      "The model composes cards, facts, and charts at runtime through the present tool.",
+    link: "/examples/generative-ui",
+    githubLink:
+      "https://github.com/assistant-ui/assistant-ui/tree/main/examples/with-generative-ui",
+  },
+  {
+    title: "Interactables",
+    image: "/screenshot/examples/interactables.png",
+    description:
+      "Task board and sticky notes with AI-driven state updates and localStorage persistence.",
+    link: "https://github.com/assistant-ui/assistant-ui/tree/main/examples/with-interactables",
+    external: true,
+  },
 ];
 
 const COMMUNITY_EXAMPLES: ExampleItem[] = [
+  {
+    title: "Mastra UI Dojo",
+    image: "/screenshot/examples/mastra-ui-dojo.png",
+    description:
+      "Mastra integrated with AI SDK, Assistant UI, and CopilotKit — compare side-by-side.",
+    link: "https://github.com/mastra-ai/ui-dojo",
+    external: true,
+  },
   {
     title: "Open Canvas",
     image: "/screenshot/open-canvas.png",
@@ -119,3 +152,34 @@ const COMMUNITY_EXAMPLES: ExampleItem[] = [
 ];
 
 export { INTERNAL_EXAMPLES, COMMUNITY_EXAMPLES };
+
+export function getExampleSlug(item: ExampleItem): string | undefined {
+  if (item.external) return undefined;
+  const match = /^\/examples\/([^/?#]+)$/.exec(item.link);
+  return match?.[1];
+}
+
+export function getInternalExamplePages(): ExampleItem[] {
+  return INTERNAL_EXAMPLES.filter((item) => getExampleSlug(item) != null);
+}
+
+export function getExampleBySlug(slug: string): ExampleItem | undefined {
+  return getInternalExamplePages().find(
+    (item) => getExampleSlug(item) === slug,
+  );
+}
+
+export function getExampleNeighbors(slug: string): {
+  previous?: ExampleItem;
+  next?: ExampleItem;
+} {
+  const items = getInternalExamplePages();
+  const index = items.findIndex((item) => getExampleSlug(item) === slug);
+  if (index === -1) return {};
+  const previous = items[index - 1];
+  const next = items[index + 1];
+  return {
+    ...(previous && { previous }),
+    ...(next && { next }),
+  };
+}

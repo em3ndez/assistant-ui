@@ -1,9 +1,8 @@
-import type { ReactNode } from "react";
 import { Pressable, type PressableProps } from "react-native";
-import { useComposerSend } from "../../primitive-hooks/useComposerSend";
+import { useComposerSend } from "@assistant-ui/core/react";
 
-export type ComposerSendProps = Omit<PressableProps, "onPress"> & {
-  children: ReactNode;
+export type ComposerSendProps = Omit<PressableProps, "onPress" | "children"> & {
+  children: PressableProps["children"];
 };
 
 export const ComposerSend = ({
@@ -11,12 +10,13 @@ export const ComposerSend = ({
   disabled,
   ...pressableProps
 }: ComposerSendProps) => {
-  const { send, canSend } = useComposerSend();
+  const { send, disabled: hookDisabled } = useComposerSend();
 
   return (
     <Pressable
-      onPress={send}
-      disabled={disabled ?? !canSend}
+      onPress={() => send()}
+      disabled={disabled ?? hookDisabled}
+      accessibilityRole="button"
       {...pressableProps}
     >
       {children}

@@ -1,110 +1,48 @@
 "use client";
 
-import { Thread } from "@/components/assistant-ui/thread";
+import { Thread } from "@/components/assistant-ui/elements/thread.aui";
 import {
   AssistantRuntimeProvider,
-  makeAssistantTool,
-  useAui,
-  useAuiState,
   AuiProvider,
+  AuiConfig,
   Suggestions,
+  Tools,
+  unstable_Interactables,
+  useAui,
 } from "@assistant-ui/react";
-import { useChatRuntime } from "@assistant-ui/react-ai-sdk";
-import type { ToolCallMessagePart } from "@assistant-ui/react";
-import { TerminalIcon, CodeIcon, EyeIcon } from "lucide-react";
-import { useState } from "react";
-import { z } from "zod";
+import { useChatRuntime } from "@assistant-ui/ai-sdk";
+import { lastAssistantMessageIsCompleteWithToolCalls } from "ai";
+import {
+  ArtifactSurface,
+  ArtifactSurfaceProvider,
+  useArtifactSurface,
+} from "./artifact-surface";
+import toolkit from "./toolkit";
 
-const RenderHTMLTool = makeAssistantTool({
-  toolName: "render_html",
-  description:
-    "Whenever the user asks for HTML code, call this function. The user will see the HTML code rendered in their browser.",
-  parameters: z.object({
-    code: z.string(),
-  }),
-  execute: async () => {
-    return {};
-  },
-  render: () => {
-    return (
-      <div className="my-2 inline-flex items-center gap-2 rounded-full border bg-primary px-4 py-2 text-primary-foreground">
-        <TerminalIcon className="size-4" />
-        render_html(&#123; code: &quot;...&quot; &#125;)
-      </div>
-    );
-  },
-});
-
-function ArtifactsView() {
-  const [tab, setTab] = useState<"source" | "preview">("source");
-
-  const lastToolCall = useAuiState((s) => {
-    const messages = s.thread.messages;
-    return messages
-      .flatMap((m) =>
-        m.content.filter(
-          (c): c is ToolCallMessagePart =>
-            c.type === "tool-call" && c.toolName === "render_html",
-        ),
-      )
-      .at(-1);
-  });
-
-  const code = lastToolCall?.args["code"] as string | undefined;
-  const isComplete = lastToolCall?.result !== undefined;
-
-  if (!code) return null;
+function ArtifactExperience() {
+  const { active } = useArtifactSurface();
 
   return (
-    <div className="flex flex-grow basis-full justify-stretch p-3">
-      <div className="flex h-full w-full flex-col overflow-hidden rounded-lg border">
-        <div className="flex border-b">
-          <button
-            onClick={() => setTab("source")}
-            className={`inline-flex flex-1 items-center justify-center gap-2 px-4 py-2.5 font-medium text-sm transition-colors ${
-              tab === "source"
-                ? "bg-background text-foreground"
-                : "text-muted-foreground hover:text-foreground"
-            }`}
-          >
-            <CodeIcon className="size-4" />
-            Source Code
-          </button>
-          <button
-            onClick={() => isComplete && setTab("preview")}
-            disabled={!isComplete}
-            className={`inline-flex flex-1 items-center justify-center gap-2 px-4 py-2.5 font-medium text-sm transition-colors ${
-              !isComplete
-                ? "cursor-not-allowed opacity-50"
-                : tab === "preview"
-                  ? "bg-background text-foreground"
-                  : "text-muted-foreground hover:text-foreground"
-            }`}
-          >
-            <EyeIcon className="size-4" />
-            Preview
-          </button>
-        </div>
-        {tab === "source" || !isComplete ? (
-          <div className="h-full overflow-y-auto whitespace-pre-line break-words px-4 py-2 font-mono text-sm">
-            {code}
-          </div>
-        ) : (
-          <div className="flex h-full flex-grow px-4 py-2">
-            <iframe
-              className="h-full w-full"
-              title="Artifact Preview"
-              srcDoc={code}
-            />
-          </div>
-        )}
-      </div>
-    </div>
+    <main className="bg-background flex h-full min-h-0 overflow-hidden">
+      <section
+        className={
+          active
+            ? "bg-background hidden min-w-0 md:block md:w-[min(44vw,42rem)] md:shrink-0"
+            : "bg-background min-w-0 flex-1"
+        }
+      >
+        <Thread />
+      </section>
+      <ArtifactSurface />
+    </main>
   );
 }
 
-function ThreadWithSuggestions() {
-  const aui = useAui({
+function ArtifactScopes() {
+  const aui = useAui();
+  const config = AuiConfig({
+    tools: Tools({ toolkit }),
+    unstable_interactables: unstable_Interactables(),
     suggestions: Suggestions([
       {
         title: "Build a landing page",
@@ -120,25 +58,24 @@ function ThreadWithSuggestions() {
       },
     ]),
   });
+
   return (
-    <AuiProvider value={aui}>
-      <Thread />
+    <AuiProvider extends={aui} config={config}>
+      <ArtifactSurfaceProvider>
+        <ArtifactExperience />
+      </ArtifactSurfaceProvider>
     </AuiProvider>
   );
 }
 
 export default function Home() {
-  const runtime = useChatRuntime();
+  const runtime = useChatRuntime({
+    sendAutomaticallyWhen: lastAssistantMessageIsCompleteWithToolCalls,
+  });
 
   return (
     <AssistantRuntimeProvider runtime={runtime}>
-      <main className="flex h-full justify-stretch">
-        <div className="flex-grow basis-full">
-          <ThreadWithSuggestions />
-        </div>
-        <RenderHTMLTool />
-        <ArtifactsView />
-      </main>
+      <ArtifactScopes />
     </AssistantRuntimeProvider>
   );
 }

@@ -1,77 +1,107 @@
 import { createResourceFiberRoot } from "../core/helpers/root";
-import { resource } from "../core/resource";
 import {
   createResourceFiber,
   unmountResourceFiber,
   renderResourceFiber,
   commitResourceFiber,
 } from "../core/ResourceFiber";
-import { ResourceFiber } from "../core/types";
-import { tapState } from "../hooks/tap-state";
+import type { ResourceFiber } from "../core/types";
+import { useState } from "../react-hooks/useState";
 
-// ============================================================================
-// Resource Creation
-// ============================================================================
+export type TestFiber<R, A extends readonly unknown[]> = ResourceFiber<R> & {
+  readonly __args?: (args: A) => void;
+};
+
+const pendingRerenders = new Set<ResourceFiber<any>>();
+let isPassOnStack = false;
+
+function runPass<T>(fn: () => T): T {
+  const prev = isPassOnStack;
+  isPassOnStack = true;
+  try {
+    return fn();
+  } finally {
+    isPassOnStack = prev;
+  }
+}
+
+function drainPendingRerenders() {
+  if (isPassOnStack) return;
+  runPass(() => {
+    let passes = 0;
+    for (const fiber of pendingRerenders) {
+      pendingRerenders.delete(fiber);
+      if (++passes > 50) {
+        throw new Error("Too many re-render passes in test harness");
+      }
+      if (!activeResources.has(fiber)) continue;
+      const lastArgs = propsMap.get(fiber);
+      const value = renderResourceFiber(fiber, lastArgs);
+      lastRenderValueMap.set(fiber, value);
+      commitResourceFiber(fiber);
+    }
+  });
+}
 
 /**
  * Creates a test resource fiber for unit testing.
  * This is a low-level utility that creates a ResourceFiber directly.
  * Sets up a rerender callback that automatically re-renders when state changes.
  */
-export function createTestResource<R, P>(fn: (props: P) => R) {
-  const rerenderCallback = (callback: () => boolean) => {
-    if (!callback()) return;
+export function createTestResource<R, A extends readonly unknown[]>(
+  fn: (...args: A) => R,
+): TestFiber<R, A> {
+  const rerenderCallback = (evaluate: () => boolean, apply: () => boolean) => {
+    if (!evaluate()) return;
+    apply();
 
-    // Re-render when state changes
-    if (activeResources.has(fiber)) {
-      const lastProps = propsMap.get(fiber);
-      const result = renderResourceFiber(fiber, lastProps);
-      commitResourceFiber(fiber, result);
-      lastRenderResultMap.set(fiber, result);
-    }
+    pendingRerenders.add(fiber);
+    drainPendingRerenders();
   };
 
   const fiber = createResourceFiber(
-    resource(fn),
+    fn,
     createResourceFiberRoot(rerenderCallback),
+    undefined,
+    null,
   );
   return fiber;
 }
 
-// ============================================================================
-// Resource Lifecycle Management
-// ============================================================================
-
 // Track resources for cleanup
-const activeResources = new Set<ResourceFiber<any, any>>();
-const propsMap = new WeakMap<ResourceFiber<any, any>, any>();
-const lastRenderResultMap = new WeakMap<ResourceFiber<any, any>, any>();
+const activeResources = new Set<ResourceFiber<any>>();
+const propsMap = new WeakMap<ResourceFiber<any>, any>();
+const lastRenderValueMap = new WeakMap<ResourceFiber<any>, any>();
 
 /**
  * Renders a test resource fiber with the given props and manages its lifecycle.
  * - Tracks resources for cleanup
  * - Returns the current state after render
  */
-export function renderTest<R, P>(fiber: ResourceFiber<R, P>, props: P): R {
-  propsMap.set(fiber, props);
+export function renderTest<R, A extends readonly unknown[]>(
+  fiber: TestFiber<R, A>,
+  ...args: A
+): R {
+  propsMap.set(fiber, args);
 
   // Track resource for cleanup
   activeResources.add(fiber);
 
-  // Render with new props
-  const result = renderResourceFiber(fiber, props);
-  commitResourceFiber(fiber, result);
-  lastRenderResultMap.set(fiber, result);
+  const value = runPass(() => {
+    const rendered = renderResourceFiber(fiber, args);
+    lastRenderValueMap.set(fiber, rendered);
+    commitResourceFiber(fiber);
+    return rendered;
+  });
+  drainPendingRerenders();
 
-  // Return the committed state from the result
-  // This accounts for any re-renders that happened during commit
-  return result.output;
+  return value;
 }
 
 /**
  * Unmounts a specific resource fiber and removes it from tracking.
  */
-export function unmountResource<R, P>(fiber: ResourceFiber<R, P>) {
+export function unmountResource<R>(fiber: ResourceFiber<R>) {
   if (activeResources.has(fiber)) {
     unmountResourceFiber(fiber);
     activeResources.delete(fiber);
@@ -90,19 +120,14 @@ export function cleanupAllResources() {
  * Gets the current committed state of a resource fiber.
  * Returns the state from the last render/commit cycle.
  */
-export function getCommittedOutput<R, P>(fiber: ResourceFiber<R, P>): R {
-  const lastResult = lastRenderResultMap.get(fiber);
-  if (!lastResult) {
+export function getCommittedValue<R>(fiber: ResourceFiber<R>): R {
+  if (!lastRenderValueMap.has(fiber)) {
     throw new Error(
       "No render result found for fiber. Make sure to call renderResource first.",
     );
   }
-  return lastResult.output;
+  return lastRenderValueMap.get(fiber);
 }
-
-// ============================================================================
-// Test Helpers
-// ============================================================================
 
 /**
  * Helper to subscribe to resource state changes for testing.
@@ -111,16 +136,20 @@ export function getCommittedOutput<R, P>(fiber: ResourceFiber<R, P>): R {
 export class TestSubscriber<T> {
   public callCount = 0;
   public lastState: T;
-  private fiber: ResourceFiber<any, any>;
+  private fiber: ResourceFiber<any>;
 
-  constructor(fiber: ResourceFiber<any, any>) {
+  constructor(fiber: ResourceFiber<any>) {
     this.fiber = fiber;
     // Need to render once to get initial state
-    const lastProps = propsMap.get(fiber) ?? undefined;
-    const initialResult = renderResourceFiber(fiber, lastProps as any);
-    commitResourceFiber(fiber, initialResult);
-    this.lastState = initialResult.output;
-    lastRenderResultMap.set(fiber, initialResult);
+    const initialValue = runPass(() => {
+      const lastArgs = propsMap.get(fiber) ?? [];
+      const value = renderResourceFiber(fiber, lastArgs as any);
+      commitResourceFiber(fiber);
+      return value;
+    });
+    drainPendingRerenders();
+    this.lastState = initialValue;
+    lastRenderValueMap.set(fiber, initialValue);
     activeResources.add(fiber);
   }
 
@@ -136,23 +165,31 @@ export class TestSubscriber<T> {
  * Helper class to manage resource lifecycle in tests with explicit control.
  * Useful when you need fine-grained control over mount/unmount timing.
  */
-export class TestResourceManager<R, P> {
+export class TestResourceManager<R, A extends readonly unknown[]> {
   private isActive = false;
 
-  constructor(public fiber: ResourceFiber<R, P>) {}
+  public fiber: TestFiber<R, A>;
 
-  renderAndMount(props: P): R {
+  constructor(fiber: TestFiber<R, A>) {
+    this.fiber = fiber;
+  }
+
+  renderAndMount(...args: A): R {
     if (this.isActive) {
       throw new Error("Resource already active");
     }
 
     this.isActive = true;
     activeResources.add(this.fiber);
-    propsMap.set(this.fiber, props);
-    const result = renderResourceFiber(this.fiber, props);
-    commitResourceFiber(this.fiber, result);
-    lastRenderResultMap.set(this.fiber, result);
-    return result.output;
+    propsMap.set(this.fiber, args);
+    const value = runPass(() => {
+      const rendered = renderResourceFiber(this.fiber, args);
+      lastRenderValueMap.set(this.fiber, rendered);
+      commitResourceFiber(this.fiber);
+      return rendered;
+    });
+    drainPendingRerenders();
+    return value;
   }
 
   cleanup() {
@@ -164,16 +201,19 @@ export class TestResourceManager<R, P> {
   }
 }
 
-// ============================================================================
-// Async Utilities
-// ============================================================================
-
 /**
  * Waits for the next tick of the event loop.
  * Useful for testing async state updates.
  */
 export function waitForNextTick(): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, 0));
+  return new Promise((resolve) => {
+    const channel = new MessageChannel();
+    channel.port1.onmessage = () => {
+      channel.port1.close();
+      setTimeout(resolve, 0);
+    };
+    channel.port2.postMessage(null);
+  });
 }
 
 /**
@@ -194,10 +234,6 @@ export async function waitFor(
   }
 }
 
-// ============================================================================
-// Test Data Factories
-// ============================================================================
-
 /**
  * Creates a simple counter resource for testing.
  * Commonly used across multiple test files.
@@ -215,7 +251,7 @@ export function createCounterResource(initialValue = 0) {
  */
 export function createStatefulCounterResource() {
   return (props: { initial: number }) => {
-    const [count, setCount] = tapState(props.initial);
+    const [count, setCount] = useState(props.initial);
     return {
       count,
       increment: () => setCount((c: number) => c + 1),

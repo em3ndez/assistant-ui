@@ -2,24 +2,30 @@
 export { useAui } from "./useAui";
 export { useAuiState } from "./useAuiState";
 export { useAuiEvent } from "./useAuiEvent";
+export { RenderChildrenWithAccessor } from "./RenderChildrenWithAccessor";
 
 // components
 export { AuiIf } from "./AuiIf";
-export { AuiProvider } from "./utils/react-assistant-context";
+export { AuiProvider } from "./AuiProvider";
+export { AuiConfig } from "./AuiConfig";
 
 // resources
-export { Derived } from "./Derived";
-export { attachTransformScopes } from "./attachTransformScopes";
+export { Derived, type DerivedElement } from "./Derived";
+export {
+  attachTransformScopes,
+  forwardTransformScopes,
+} from "./attachTransformScopes";
 export type { ScopesConfig } from "./attachTransformScopes";
 
-// tap hooks
+// client hooks
 export {
-  tapAssistantClientRef,
-  tapAssistantEmit,
+  useAssistantClientRef,
+  useAssistantEmit,
 } from "./utils/tap-assistant-context";
-export { tapClientResource } from "./tapClientResource";
-export { tapClientLookup } from "./tapClientLookup";
-export { tapClientList } from "./tapClientList";
+export { getClientId } from "./utils/client-accessor";
+export { useClientResource } from "./useClientResource";
+export { useClientLookup } from "./useClientLookup";
+export { useClientList } from "./useClientList";
 
 // types
 export type {

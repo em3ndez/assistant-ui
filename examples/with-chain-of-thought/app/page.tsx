@@ -2,68 +2,37 @@
 
 import {
   AssistantRuntimeProvider,
-  makeAssistantTool,
+  AuiConfig,
+  Tools,
   useAui,
   AuiProvider,
   Suggestions,
 } from "@assistant-ui/react";
-import { useChatRuntime } from "@assistant-ui/react-ai-sdk";
-import { z } from "zod";
+import { useChatRuntime } from "@assistant-ui/ai-sdk";
 import { MyThread } from "./MyThread";
 import { lastAssistantMessageIsCompleteWithApprovalResponses } from "ai";
-
-const ExecuteJsTool = makeAssistantTool({
-  toolName: "execute_js",
-  description: "Execute JavaScript code and return the result",
-  parameters: z.object({
-    code: z.string().describe("The JavaScript code to execute"),
-  }),
-  execute: async ({ code }) => {
-    try {
-      // biome-ignore lint/security/noGlobalEval: example code
-      const result = eval(code);
-      return { success: true, result: String(result) };
-    } catch (e) {
-      return { success: false, error: String(e) };
-    }
-  },
-  render: ({ args, result, status }) => (
-    <div className="my-2 rounded-lg border bg-muted/30 p-4 text-sm">
-      <p className="mb-1 font-semibold">execute_js</p>
-      <pre className="whitespace-pre-wrap rounded bg-background p-2 font-mono text-xs">
-        {args.code}
-      </pre>
-      {status.type !== "running" && result && (
-        <div className="mt-2 border-t pt-2">
-          <p className="font-semibold text-muted-foreground">
-            {result.success ? "Result:" : "Error:"}
-          </p>
-          <pre className="whitespace-pre-wrap font-mono text-xs">
-            {result.success ? result.result : result.error}
-          </pre>
-        </div>
-      )}
-    </div>
-  ),
-});
+import toolkit from "./toolkit";
 
 function MyThreadWithSuggestions() {
-  const aui = useAui({
+  const aui = useAui();
+  const config = AuiConfig({
     suggestions: Suggestions([
       {
         title: "Calculate Fibonacci(20)",
-        label: "step by step with code",
-        prompt: "Calculate the 20th Fibonacci number using JavaScript.",
+        label: "with chain of thought",
+        prompt:
+          "Calculate Fibonacci(20) with the Fibonacci calculator tool and explain the result.",
       },
       {
-        title: "What is 2^16?",
-        label: "show your reasoning",
-        prompt: "What is 2 to the power of 16? Show your work step by step.",
+        title: "Research with citations",
+        label: "show sources",
+        prompt:
+          "Research recent developments in renewable energy and cite your sources.",
       },
     ]),
   });
   return (
-    <AuiProvider value={aui}>
+    <AuiProvider extends={aui} config={config}>
       <MyThread />
     </AuiProvider>
   );
@@ -73,10 +42,12 @@ export default function Home() {
   const runtime = useChatRuntime({
     sendAutomaticallyWhen: lastAssistantMessageIsCompleteWithApprovalResponses,
   });
+  const config = AuiConfig({
+    tools: Tools({ toolkit }),
+  });
 
   return (
-    <AssistantRuntimeProvider runtime={runtime}>
-      <ExecuteJsTool />
+    <AssistantRuntimeProvider config={config} runtime={runtime}>
       <div className="h-full">
         <MyThreadWithSuggestions />
       </div>

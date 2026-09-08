@@ -1,14 +1,15 @@
 "use client";
 
-import { Primitive } from "@radix-ui/react-primitive";
+import { Primitive, renderSlot } from "../../utils/Primitive";
 import {
   type ComponentRef,
   forwardRef,
-  ComponentPropsWithoutRef,
-  ElementType,
+  type ComponentPropsWithoutRef,
+  type ElementType,
+  isValidElement,
 } from "react";
 import { useMessagePartText } from "./useMessagePartText";
-import { useSmooth } from "../../utils/smooth/useSmooth";
+import { useSmooth, type SmoothOptions } from "../../utils/smooth/useSmooth";
 
 export namespace MessagePartPrimitiveText {
   export type Element = ComponentRef<typeof Primitive.span>;
@@ -19,11 +20,14 @@ export namespace MessagePartPrimitiveText {
     /**
      * Whether to enable smooth text streaming animation.
      * When enabled, text appears with a typing effect as it streams in.
+     * Pass a `SmoothOptions` object to tune the reveal rate.
+     * Auto-disables under `prefers-reduced-motion: reduce`.
      * @default true
      */
-    smooth?: boolean;
+    smooth?: boolean | SmoothOptions;
     /**
      * The HTML element or React component to render as.
+     * Ignored when a valid `render` element is supplied.
      * @default "span"
      */
     component?: ElementType;
@@ -49,14 +53,25 @@ export namespace MessagePartPrimitiveText {
 export const MessagePartPrimitiveText = forwardRef<
   MessagePartPrimitiveText.Element,
   MessagePartPrimitiveText.Props
->(({ smooth = true, component: Component = "span", ...rest }, forwardedRef) => {
-  const { text, status } = useSmooth(useMessagePartText(), smooth);
+>(
+  (
+    { smooth = true, component: Component = Primitive.span, render, ...rest },
+    forwardedRef,
+  ) => {
+    const { text, status } = useSmooth(useMessagePartText(), smooth);
 
-  return (
-    <Component data-status={status.type} {...rest} ref={forwardedRef}>
-      {text}
-    </Component>
-  );
-});
+    const mergedProps = {
+      "data-status": status.type,
+      ...rest,
+      ref: forwardedRef,
+    };
+
+    if (render && isValidElement(render)) {
+      return renderSlot(render, text, mergedProps);
+    }
+
+    return <Component {...mergedProps}>{text}</Component>;
+  },
+);
 
 MessagePartPrimitiveText.displayName = "MessagePartPrimitive.Text";

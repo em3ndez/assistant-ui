@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { tapEffect } from "../../hooks/tap-effect";
-import { tapState } from "../../hooks/tap-state";
+import { useEffect } from "../../react-hooks/useEffect";
+import { useEffectEvent } from "../../react-hooks/useEffectEvent";
+import { useState } from "../../react-hooks/useState";
 import {
   createTestResource,
   renderTest,
@@ -8,7 +9,7 @@ import {
   TestResourceManager,
 } from "../test-utils";
 
-describe("tapEffect - Basic Functionality", () => {
+describe("useEffect - Basic Functionality", () => {
   afterEach(() => {
     cleanupAllResources();
   });
@@ -20,7 +21,7 @@ describe("tapEffect - Basic Functionality", () => {
       const testFiber = createTestResource(() => {
         executionOrder.push("render");
 
-        tapEffect(() => {
+        useEffect(() => {
           executionOrder.push("effect");
         });
 
@@ -31,7 +32,7 @@ describe("tapEffect - Basic Functionality", () => {
       const manager = new TestResourceManager(testFiber);
 
       // Mount and render
-      manager.renderAndMount(undefined);
+      manager.renderAndMount();
 
       // Effect should run after commit
       expect(executionOrder).toEqual(["render", "effect"]);
@@ -44,12 +45,12 @@ describe("tapEffect - Basic Functionality", () => {
       const effect = vi.fn(() => cleanup);
 
       const testFiber = createTestResource(() => {
-        tapEffect(effect);
+        useEffect(effect);
         return null;
       });
 
       const manager = new TestResourceManager(testFiber);
-      manager.renderAndMount(undefined);
+      manager.renderAndMount();
 
       // Effect should be called, but not cleanup
       expect(effect).toHaveBeenCalledTimes(1);
@@ -64,15 +65,15 @@ describe("tapEffect - Basic Functionality", () => {
       const cleanupOrder: string[] = [];
 
       const testFiber = createTestResource(() => {
-        tapEffect(() => {
+        useEffect(() => {
           return () => cleanupOrder.push("first");
         });
 
-        tapEffect(() => {
+        useEffect(() => {
           return () => cleanupOrder.push("second");
         });
 
-        tapEffect(() => {
+        useEffect(() => {
           return () => cleanupOrder.push("third");
         });
 
@@ -80,7 +81,7 @@ describe("tapEffect - Basic Functionality", () => {
       });
 
       const manager = new TestResourceManager(testFiber);
-      manager.renderAndMount(undefined);
+      manager.renderAndMount();
       manager.cleanup();
 
       // Cleanup should run in reverse order (LIFO)
@@ -91,24 +92,27 @@ describe("tapEffect - Basic Functionality", () => {
   describe("Multiple Effects", () => {
     it("should execute multiple effects in registration order", () => {
       const executionOrder: string[] = [];
-      const effects = [
+      const effects: useEffect.EffectCallback[] = [
         () => {
           executionOrder.push("effect1");
+          return undefined;
         },
         () => {
           executionOrder.push("effect2");
+          return undefined;
         },
         () => {
           executionOrder.push("effect3");
+          return undefined;
         },
       ];
 
       const testFiber = createTestResource(() => {
-        effects.forEach((fn) => tapEffect(fn));
+        effects.forEach((fn) => useEffect(fn));
         return null;
       });
 
-      renderTest(testFiber, undefined);
+      renderTest(testFiber);
       expect(executionOrder).toEqual(["effect1", "effect2", "effect3"]);
     });
 
@@ -121,18 +125,17 @@ describe("tapEffect - Basic Functionality", () => {
 
       const testFiber = createTestResource((props: { value: number }) => {
         // Effect without deps - runs on every render
-        tapEffect(() => {
+        useEffect(() => {
           effectCalls.always++;
         });
 
         // Effect with empty deps - runs only once
-        tapEffect(() => {
+        useEffect(() => {
           effectCalls.once++;
         }, []);
 
         // Effect with deps - runs when deps change
-        // biome-ignore lint/correctness/useExhaustiveDependencies: test
-        tapEffect(() => {
+        useEffect(() => {
           effectCalls.conditional++;
         }, [props.value]);
 
@@ -159,19 +162,19 @@ describe("tapEffect - Basic Functionality", () => {
       let triggerRerender: (() => void) | null = null;
 
       const testFiber = createTestResource(() => {
-        const [, setState] = tapState(0);
+        const [, setState] = useState(0);
 
-        tapEffect(() => {
+        useEffect(() => {
           triggerRerender = () => setState((prev) => prev + 1);
         });
 
-        tapEffect(effect, []);
+        useEffect(effect, []);
 
         return null;
       });
 
       // Initial render
-      renderTest(testFiber, undefined);
+      renderTest(testFiber);
       expect(effect).toHaveBeenCalledTimes(1);
 
       // Trigger re-render
@@ -185,7 +188,7 @@ describe("tapEffect - Basic Functionality", () => {
       const effect = vi.fn();
 
       const testFiber = createTestResource((props: { dep: string }) => {
-        tapEffect(() => {
+        useEffect(() => {
           effect(props.dep);
         }, [props.dep]);
 
@@ -209,15 +212,59 @@ describe("tapEffect - Basic Functionality", () => {
   });
 
   describe("Effect Timing", () => {
+    it("should update effect events before user effect setup", () => {
+      const events: string[] = [];
+      let value = "initial";
+
+      const testFiber = createTestResource(() => {
+        let event!: () => string;
+        useEffect(() => {
+          events.push(event());
+        });
+        event = useEffectEvent(() => value);
+
+        return null;
+      });
+
+      renderTest(testFiber);
+      value = "updated";
+      renderTest(testFiber);
+
+      expect(events).toEqual(["initial", "updated"]);
+    });
+
+    it("should update effect events before user effect cleanup", () => {
+      const events: string[] = [];
+      let value = "initial";
+
+      const testFiber = createTestResource(() => {
+        let event!: () => string;
+        useEffect(() => {
+          return () => {
+            events.push(event());
+          };
+        });
+        event = useEffectEvent(() => value);
+
+        return null;
+      });
+
+      renderTest(testFiber);
+      value = "updated";
+      renderTest(testFiber);
+
+      expect(events).toEqual(["updated"]);
+    });
+
     it("should run effects after state updates are committed", () => {
       const events: string[] = [];
 
       const testFiber = createTestResource(() => {
-        const [count, setCount] = tapState(0);
+        const [count, setCount] = useState(0);
 
         events.push(`render: ${count}`);
 
-        tapEffect(() => {
+        useEffect(() => {
           events.push(`effect: ${count}`);
 
           // Only update on first effect to avoid infinite loop
@@ -232,7 +279,7 @@ describe("tapEffect - Basic Functionality", () => {
       const manager = new TestResourceManager(testFiber);
 
       // Initial render
-      manager.renderAndMount(undefined);
+      manager.renderAndMount();
       // Without mount tracking, the effect runs immediately during commit
       // This triggers setState which causes a synchronous re-render
       expect(events).toEqual([

@@ -7,7 +7,10 @@ import type { ChatRegistry } from "../chat/ChatRegistry";
 import { MessagePersistence } from "../chat/MessagePersistence";
 import { ThreadSessionManager } from "./ThreadSessionManager";
 import { TitlePolicy } from "./TitlePolicy";
-import { CloudTelemetryReporter } from "./CloudTelemetryReporter";
+import {
+  CloudTelemetryReporter,
+  type TelemetryFinishEvent,
+} from "./CloudTelemetryReporter";
 
 export type CloudChatConfig = Omit<
   UseCloudChatOptions,
@@ -27,16 +30,19 @@ export class CloudChatCore {
   readonly titlePolicy: TitlePolicy;
   readonly telemetryReporter: CloudTelemetryReporter;
 
-  /** Updated by the React wrapper each render. */
   options: CloudChatCoreOptions;
   /** Set by the React wrapper. */
   mountedRef: { current: boolean } = { current: true };
-  /** Set by the React wrapper. */
-  baseTransport!: ChatTransport<UIMessage>;
+  private baseTransport: ChatTransport<UIMessage>;
 
-  constructor(cloud: AssistantCloud, options: CloudChatCoreOptions) {
+  constructor(
+    cloud: AssistantCloud,
+    options: CloudChatCoreOptions,
+    baseTransport: ChatTransport<UIMessage>,
+  ) {
     this.cloud = cloud;
     this.options = options;
+    this.baseTransport = baseTransport;
     this.persistence = new MessagePersistence(
       cloud,
       this.handleSyncError.bind(this),
@@ -44,6 +50,14 @@ export class CloudChatCore {
     this.sessionManager = new ThreadSessionManager();
     this.titlePolicy = new TitlePolicy();
     this.telemetryReporter = new CloudTelemetryReporter(cloud);
+  }
+
+  updateOptions(
+    options: CloudChatCoreOptions,
+    baseTransport: ChatTransport<UIMessage>,
+  ): void {
+    this.options = options;
+    this.baseTransport = baseTransport;
   }
 
   async ensureThreadId(
@@ -87,6 +101,7 @@ export class CloudChatCore {
   async persistChatMessages(
     chatKey: string,
     registry: ChatRegistry,
+    finishEvent?: TelemetryFinishEvent,
   ): Promise<void> {
     const meta = registry.getMeta(chatKey);
     const threadId = meta?.threadId;
@@ -99,12 +114,25 @@ export class CloudChatCore {
     await this.persist(threadId, messages);
 
     this.telemetryReporter
-      .reportFromMessages(threadId, messages)
+      .reportFromMessages(threadId, messages, finishEvent)
       .catch(() => {});
 
     if (this.titlePolicy.shouldGenerateTitle(threadId, messages)) {
-      this.titlePolicy.markTitleGenerated(threadId);
-      void this.options.threads.generateTitle(threadId);
+      this.titlePolicy.markTitleGenerationStarted(threadId);
+      void this.options.threads
+        .generateTitle(threadId, { automatic: true })
+        .then(
+          (title) => {
+            if (title) {
+              this.titlePolicy.markTitleGenerated(threadId);
+            } else {
+              this.titlePolicy.markTitleGenerationFailed(threadId);
+            }
+          },
+          () => {
+            this.titlePolicy.markTitleGenerationFailed(threadId);
+          },
+        );
     }
   }
 
@@ -127,7 +155,9 @@ export class CloudChatCore {
         this.handleSyncError(err);
       }
     }
-    meta.loading = null;
+    if (!cancelledRef.cancelled) {
+      meta.loading = null;
+    }
   }
 
   createTransport(
@@ -162,7 +192,11 @@ export class CloudChatCore {
     };
   }
 
-  createChat(chatKey: string, registry: ChatRegistry): Chat<UIMessage> {
+  createChat(
+    chatKey: string,
+    registry: ChatRegistry,
+    chatConfig: CloudChatConfig = this.options.chatConfig,
+  ): Chat<UIMessage> {
     const {
       onFinish: _onFinish,
       onData: _onData,
@@ -171,17 +205,21 @@ export class CloudChatCore {
       sendAutomaticallyWhen: _sendAutomaticallyWhen,
       id: _id,
       ...chatInit
-    } = this.options.chatConfig;
+    } = chatConfig;
 
     return new Chat<UIMessage>({
       ...chatInit,
       id: chatKey,
       transport: this.createTransport(chatKey, registry),
-      onFinish: async (event) => {
+      onFinish: (event) => {
         try {
           this.options.chatConfig.onFinish?.(event);
         } finally {
-          await this.persistChatMessages(chatKey, registry);
+          void this.persistChatMessages(chatKey, registry, event).catch(
+            (error) => {
+              this.handleSyncError(error);
+            },
+          );
         }
       },
       onError: (error) => {
@@ -191,7 +229,7 @@ export class CloudChatCore {
         this.options.chatConfig.onData?.(data);
       },
       onToolCall: (toolCall) => {
-        this.options.chatConfig.onToolCall?.(toolCall);
+        return this.options.chatConfig.onToolCall?.(toolCall);
       },
       sendAutomaticallyWhen: (arg) =>
         this.options.chatConfig.sendAutomaticallyWhen?.(arg) ?? false,
@@ -200,6 +238,28 @@ export class CloudChatCore {
 
   private handleSyncError(err: unknown): void {
     const error = err instanceof Error ? err : new Error(String(err));
-    this.options.onSyncError?.(error);
+    const onSyncError = this.options.onSyncError;
+    if (!onSyncError) return;
+
+    const reportCallbackError = (callbackError: unknown) => {
+      console.error(
+        "[cloud-ai-sdk] onSyncError callback threw an error",
+        callbackError,
+      );
+    };
+
+    try {
+      const result = onSyncError(error) as unknown;
+      if (
+        result !== null &&
+        (typeof result === "object" || typeof result === "function") &&
+        "then" in result &&
+        typeof result.then === "function"
+      ) {
+        void Promise.resolve(result).catch(reportCallbackError);
+      }
+    } catch (callbackError) {
+      reportCallbackError(callbackError);
+    }
   }
 }

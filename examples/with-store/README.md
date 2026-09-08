@@ -5,8 +5,8 @@ This is a Next.js application demonstrating the `@assistant-ui/store` package.
 ## Features Demonstrated
 
 - **Client Registry**: Module augmentation for type-safe client definitions
-- **tapClientList**: Managing lists with index and key lookup
-- **tapAssistantEmit**: Emitting and subscribing to scoped events
+- **useClientList**: Managing lists with index and key lookup
+- **useAssistantEmit**: Emitting and subscribing to scoped events
 - **Derived**: Creating derived client scopes from parent resources
 - **Provider Pattern**: Scoped access to list items via FooProvider
 - **Component Composition**: Render props pattern with components prop
@@ -70,10 +70,10 @@ declare module "@assistant-ui/store" {
 
 ```typescript
 const FooListResource = resource(
-  ({ initialValues }): ClientOutput<"fooList"> => {
-    const emit = tapAssistantEmit();
+  function FooListResource({ initialValues }): ClientOutput<"fooList"> {
+    const emit = useAssistantEmit();
 
-    const foos = tapClientList({
+    const foos = useClientList({
       initialValues: initialValues ? [/* ... */] : [],
       getKey: (foo) => foo.id,
       resource: FooItemResource,
@@ -95,14 +95,19 @@ const FooListResource = resource(
 
 ```typescript
 const FooProvider = ({ index, children }) => {
-  const aui = useAui({
+  const aui = useAui();
+  const config = AuiConfig({
     foo: Derived({
       source: "fooList",
       query: { index },
       get: (aui) => aui.fooList().foo({ index }),
     }),
   });
-  return <AuiProvider value={aui}>{children}</AuiProvider>;
+  return (
+    <AuiProvider extends={aui} config={config}>
+      {children}
+    </AuiProvider>
+  );
 };
 ```
 
@@ -122,5 +127,5 @@ useAuiEvent("*", (data) => {
 
 ## Learn More
 
-- [@assistant-ui/store Documentation](../store/README.md)
+- [@assistant-ui/store Documentation](https://github.com/assistant-ui/assistant-ui/tree/main/packages/store)
 - [Next.js Documentation](https://nextjs.org/docs)

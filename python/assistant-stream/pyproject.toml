@@ -4,13 +4,13 @@ build-backend = "hatchling.build"
 
 [project]
 name = "assistant-stream"
-version = "0.0.32"
+version = "0.0.37"
 description = ""
 authors = [
   { name="Simon Farshid", email="simon@assistant-ui.com" },
 ]
 readme = "README.md"
-requires-python = ">=3.9,<4.0"
+requires-python = ">=3.10,<4.0"
 classifiers = [
     "Programming Language :: Python :: 3",
     "License :: OSI Approved :: MIT License",
@@ -22,7 +22,8 @@ dependencies = [
 
 [project.optional-dependencies]
 langgraph = ["langchain-core>=0.3.0"]
-dev = ["pytest<8"]
+redis = ["redis>=5"]
+dev = ["pytest<8", "redis>=5"]
 
 [project.urls]
 Homepage = "https://github.com/assistant-ui/assistant-ui"

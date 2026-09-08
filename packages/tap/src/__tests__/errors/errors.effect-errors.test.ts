@@ -1,7 +1,7 @@
-/** biome-ignore-all lint/correctness/useExhaustiveDependencies: tests */
+/* oxlint-disable react/exhaustive-deps -- tests deliberately exercise invalid dep arrays */
 import { describe, it, expect, vi } from "vitest";
-import { tapEffect } from "../../hooks/tap-effect";
-import { tapState } from "../../hooks/tap-state";
+import { useEffect } from "../../react-hooks/useEffect";
+import { useState } from "../../react-hooks/useState";
 import { createTestResource, renderTest, unmountResource } from "../test-utils";
 import {
   renderResourceFiber,
@@ -13,13 +13,13 @@ describe("Errors - Effect Errors", () => {
     const error = new Error("Effect error");
 
     const resource = createTestResource(() => {
-      tapEffect(() => {
+      useEffect(() => {
         throw error;
       });
       return null;
     });
 
-    expect(() => renderTest(resource, undefined)).toThrow(error);
+    expect(() => renderTest(resource)).toThrow(error);
   });
 
   it("should propagate errors from cleanup functions", () => {
@@ -27,7 +27,7 @@ describe("Errors - Effect Errors", () => {
     let dep = 0;
 
     const resource = createTestResource(() => {
-      tapEffect(() => {
+      useEffect(() => {
         return () => {
           if (dep > 0) {
             throw error;
@@ -39,26 +39,26 @@ describe("Errors - Effect Errors", () => {
     });
 
     // First render and commit - establishes the effect
-    const ctx1 = renderResourceFiber(resource, undefined);
-    commitResourceFiber(resource, ctx1);
+    renderResourceFiber(resource, []);
+    commitResourceFiber(resource);
 
     // Change dep to trigger cleanup on next render
     dep = 1;
 
     // Second render with different dep should trigger cleanup that throws
-    const ctx2 = renderResourceFiber(resource, undefined);
-    expect(() => commitResourceFiber(resource, ctx2)).toThrow(error);
+    renderResourceFiber(resource, []);
+    expect(() => commitResourceFiber(resource)).toThrow(error);
   });
 
   it("should throw on invalid effect return value", () => {
     const resource = createTestResource(() => {
-      tapEffect(() => {
+      useEffect(() => {
         return "not a function" as any; // Invalid return
       });
       return null;
     });
 
-    expect(() => renderTest(resource, undefined)).toThrow(
+    expect(() => renderTest(resource)).toThrow(
       "An effect function must either return a cleanup function or nothing",
     );
   });
@@ -69,13 +69,13 @@ describe("Errors - Effect Errors", () => {
     const goodEffect = vi.fn();
 
     const resource = createTestResource(() => {
-      tapEffect(() => {
+      useEffect(() => {
         throw error1;
       });
 
-      tapEffect(goodEffect); // This won't run
+      useEffect(goodEffect); // This won't run
 
-      tapEffect(() => {
+      useEffect(() => {
         throw error2;
       });
 
@@ -83,9 +83,7 @@ describe("Errors - Effect Errors", () => {
     });
 
     // Should throw aggregate error
-    expect(() =>
-      renderTest(resource, undefined),
-    ).toThrowErrorMatchingInlineSnapshot(`
+    expect(() => renderTest(resource)).toThrowErrorMatchingInlineSnapshot(`
       [AggregateError: Errors during commit]
     `);
     expect(goodEffect).toHaveBeenCalledTimes(1);
@@ -100,13 +98,13 @@ describe("Errors - Effect Errors", () => {
     const cleanup3 = vi.fn();
 
     const resource = createTestResource(() => {
-      tapEffect(() => cleanup1);
-      tapEffect(() => cleanup2);
-      tapEffect(() => cleanup3);
+      useEffect(() => cleanup1);
+      useEffect(() => cleanup2);
+      useEffect(() => cleanup3);
       return null;
     });
 
-    renderTest(resource, undefined);
+    renderTest(resource);
 
     // Unmount should throw the error but should still run all cleanups
     expect(() => unmountResource(resource)).toThrow(cleanupError);
@@ -120,16 +118,16 @@ describe("Errors - Effect Errors", () => {
     let shouldThrow = false;
 
     const resource = createTestResource(() => {
-      const [dep, setDep] = tapState(0);
+      const [dep, setDep] = useState(0);
 
-      tapEffect(() => {
+      useEffect(() => {
         if (shouldThrow) {
           throw error;
         }
       }, [dep]);
 
       // Use effect to trigger state change
-      tapEffect(() => {
+      useEffect(() => {
         if (dep === 0) {
           shouldThrow = true;
           setDep(1); // Trigger effect re-run
@@ -141,7 +139,7 @@ describe("Errors - Effect Errors", () => {
 
     // The initial render will trigger setState which causes flushSync
     // The flushed re-render will throw the error
-    expect(() => renderTest(resource, undefined)).toThrow(error);
+    expect(() => renderTest(resource)).toThrow(error);
   });
 
   it("should handle async errors in effects", async () => {
@@ -149,7 +147,7 @@ describe("Errors - Effect Errors", () => {
     let asyncErrorPromise: Promise<void>;
 
     const resource = createTestResource(() => {
-      tapEffect(() => {
+      useEffect(() => {
         // Async errors are not caught by the framework
         asyncErrorPromise = new Promise((_, reject) => {
           setTimeout(() => {
@@ -166,7 +164,7 @@ describe("Errors - Effect Errors", () => {
     });
 
     // This won't throw synchronously
-    expect(() => renderTest(resource, undefined)).not.toThrow();
+    expect(() => renderTest(resource)).not.toThrow();
 
     // Wait for the async error to be handled
     await new Promise((resolve) => setTimeout(resolve, 10));
@@ -177,9 +175,9 @@ describe("Errors - Effect Errors", () => {
     let effectRan = false;
 
     const resource = createTestResource(() => {
-      const [value] = tapState("initial");
+      const [value] = useState("initial");
 
-      tapEffect(() => {
+      useEffect(() => {
         effectRan = true;
         throw error;
       });
@@ -187,7 +185,7 @@ describe("Errors - Effect Errors", () => {
       return value;
     });
 
-    expect(() => renderTest(resource, undefined)).toThrow(error);
+    expect(() => renderTest(resource)).toThrow(error);
     expect(effectRan).toBe(true);
 
     // Resource should not have committed state since commit failed
@@ -199,9 +197,9 @@ describe("Errors - Effect Errors", () => {
     let throwOnCleanup = false;
 
     const resource = createTestResource(() => {
-      const [count, setCount] = tapState(0);
+      const [count, setCount] = useState(0);
 
-      tapEffect(() => {
+      useEffect(() => {
         return () => {
           if (throwOnCleanup) {
             throw cleanupError;
@@ -210,7 +208,7 @@ describe("Errors - Effect Errors", () => {
       }, [count]);
 
       // Use effect to trigger state change
-      tapEffect(() => {
+      useEffect(() => {
         if (count === 0) {
           throwOnCleanup = true;
           setCount(1);
@@ -222,6 +220,6 @@ describe("Errors - Effect Errors", () => {
 
     // The initial render will trigger setState which causes flushSync
     // During the flush, the cleanup will run and throw
-    expect(() => renderTest(resource, undefined)).toThrow(cleanupError);
+    expect(() => renderTest(resource)).toThrow(cleanupError);
   });
 });

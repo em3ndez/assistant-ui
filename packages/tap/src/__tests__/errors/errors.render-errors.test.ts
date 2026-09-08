@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { tapEffect } from "../../hooks/tap-effect";
-import { tapState } from "../../hooks/tap-state";
+import { useEffect } from "../../react-hooks/useEffect";
+import { useState } from "../../react-hooks/useState";
 import { createTestResource, renderTest } from "../test-utils";
 import {
   renderResourceFiber,
@@ -16,17 +16,17 @@ describe("Errors - Render Errors", () => {
       throw error;
     });
 
-    expect(() => renderResourceFiber(resource, undefined)).toThrow(error);
+    expect(() => renderResourceFiber(resource, [])).toThrow(error);
   });
 
   it("should throw when hooks are called outside render context", () => {
     // Try to call hook outside of resource render
     expect(() => {
-      tapState(0);
+      useState(0);
     }).toThrow("No resource fiber available");
 
     expect(() => {
-      tapEffect(() => {});
+      useEffect(() => {});
     }).toThrow("No resource fiber available");
   });
 
@@ -34,37 +34,80 @@ describe("Errors - Render Errors", () => {
     const error = new Error("Initializer error");
 
     const resource = createTestResource(() => {
-      const [value] = tapState(() => {
+      const [value] = useState(() => {
         throw error;
       });
       return value;
     });
 
-    expect(() => renderResourceFiber(resource, undefined)).toThrow(error);
+    expect(() => renderResourceFiber(resource, [])).toThrow(error);
   });
 
-  it("should detect render during render", () => {
+  it("should process setState during render as a render-phase update", () => {
     const resource = createTestResource(() => {
-      const [count, setCount] = tapState(0);
-
-      // This violates the rules - no state updates during render
-      if (count < 5) {
-        expect(() => setCount(count + 1)).toThrow(
-          "Resource updated during render",
-        );
-      }
-
+      const [count, setCount] = useState(0);
+      if (count < 5) setCount(count + 1);
       return count;
     });
 
-    renderResourceFiber(resource, undefined);
+    expect(renderResourceFiber(resource, [])).toBe(5);
+  });
+
+  it("should throw when updating a different resource during render", () => {
+    let setOther!: (value: number) => void;
+    const other = createTestResource(() => {
+      const [value, setValue] = useState(0);
+      setOther = setValue;
+      return value;
+    });
+    renderTest(other);
+
+    const resource = createTestResource(() => {
+      setOther(1);
+      return null;
+    });
+
+    expect(() => renderResourceFiber(resource, [])).toThrow(
+      "Cannot update a resource while rendering a different resource",
+    );
+  });
+
+  it("should throw when a child updates its parent mid-render", () => {
+    let setParent!: (value: number) => void;
+    const child = createTestResource(() => {
+      setParent(1);
+      return null;
+    });
+
+    const parent = createTestResource(() => {
+      const [value, setValue] = useState(0);
+      setParent = setValue;
+      renderResourceFiber(child, []);
+      return value;
+    });
+
+    expect(() => renderResourceFiber(parent, [])).toThrow(
+      "Cannot update a resource while rendering a different resource",
+    );
+  });
+
+  it("should throw on unbounded render-phase updates", () => {
+    const resource = createTestResource(() => {
+      const [count, setCount] = useState(0);
+      setCount(count + 1);
+      return count;
+    });
+
+    expect(() => renderResourceFiber(resource, [])).toThrow(
+      "Too many re-renders",
+    );
   });
 
   it("should allow setState during commit (effects)", () => {
     const resource = createTestResource(() => {
-      const [count, setCount] = tapState(0);
+      const [count, setCount] = useState(0);
 
-      tapEffect(() => {
+      useEffect(() => {
         // setState during effects (commit phase) is allowed
         if (count < 5) {
           setCount(count + 1);
@@ -74,9 +117,9 @@ describe("Errors - Render Errors", () => {
       return count;
     });
 
-    const ctx = renderResourceFiber(resource, undefined);
+    renderResourceFiber(resource, []);
     // This should not throw - setState in effects is allowed
-    expect(() => commitResourceFiber(resource, ctx)).not.toThrow();
+    expect(() => commitResourceFiber(resource)).not.toThrow();
     unmountResourceFiber(resource);
   });
 
@@ -85,20 +128,20 @@ describe("Errors - Render Errors", () => {
 
     const resource = createTestResource(() => {
       if (useStateFirst) {
-        tapState(1);
-        tapEffect(() => {});
+        useState(1);
+        useEffect(() => {});
       } else {
-        tapEffect(() => {});
-        tapState(1);
+        useEffect(() => {});
+        useState(1);
       }
       return null;
     });
 
-    renderResourceFiber(resource, undefined);
+    renderResourceFiber(resource, []);
 
     useStateFirst = false;
 
-    expect(() => renderResourceFiber(resource, undefined)).toThrow(
+    expect(() => renderResourceFiber(resource, [])).toThrow(
       "Hook order changed between renders",
     );
   });
@@ -107,7 +150,7 @@ describe("Errors - Render Errors", () => {
     let shouldThrow = false;
 
     const resource = createTestResource(() => {
-      const [count, _setCount] = tapState(42);
+      const [count, _setCount] = useState(42);
 
       if (shouldThrow) {
         throw new Error("Render failed");
@@ -117,12 +160,12 @@ describe("Errors - Render Errors", () => {
     });
 
     // First successful render
-    const result = renderTest(resource, undefined);
-    expect(result).toBe(42);
+    const value = renderTest(resource);
+    expect(value).toBe(42);
 
     // Failed render
     shouldThrow = true;
-    expect(() => renderTest(resource, undefined)).toThrow("Render failed");
+    expect(() => renderTest(resource)).toThrow("Render failed");
 
     // State should be unchanged after failed render
     // The resource state is preserved
@@ -134,11 +177,11 @@ describe("Errors - Render Errors", () => {
     const resource = createTestResource(() => {
       if (phase === "hook-order") {
         // Wrong hook order
-        tapEffect(() => {});
-        tapState(1);
+        useEffect(() => {});
+        useState(1);
       } else {
-        tapState(1);
-        tapEffect(() => {
+        useState(1);
+        useEffect(() => {
           if (phase === "effect-error") {
             throw new Error("Effect error");
           }
@@ -153,25 +196,25 @@ describe("Errors - Render Errors", () => {
     });
 
     // Successful render
-    renderTest(resource, undefined);
+    renderTest(resource);
 
     // Render error
     phase = "render-error";
-    expect(() => renderTest(resource, undefined)).toThrow("Render error");
+    expect(() => renderTest(resource)).toThrow("Render error");
 
     // Hook order error
     phase = "hook-order";
-    expect(() => renderTest(resource, undefined)).toThrow("Hook order changed");
+    expect(() => renderTest(resource)).toThrow("Hook order changed");
 
     // Effect error
     phase = "effect-error";
-    expect(() => renderTest(resource, undefined)).toThrow("Effect error");
+    expect(() => renderTest(resource)).toThrow("Effect error");
   });
 
   it("should handle errors in nested hook calls", () => {
     const useFeature = () => {
       // This will fail if called outside render
-      const [value] = tapState("feature");
+      const [value] = useState("feature");
       return value;
     };
 
@@ -184,7 +227,7 @@ describe("Errors - Render Errors", () => {
       return feature;
     });
 
-    const result = renderTest(resource, undefined);
-    expect(result).toBe("feature");
+    const value = renderTest(resource);
+    expect(value).toBe("feature");
   });
 });

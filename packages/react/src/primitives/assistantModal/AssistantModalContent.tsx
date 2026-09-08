@@ -1,15 +1,19 @@
 "use client";
 
-import { ComponentPropsWithoutRef, ComponentRef, forwardRef } from "react";
+import {
+  type ComponentPropsWithoutRef,
+  type ComponentRef,
+  forwardRef,
+} from "react";
 import { Popover as PopoverPrimitive } from "radix-ui";
-import { ScopedProps, usePopoverScope } from "./scope";
-import { composeEventHandlers } from "@radix-ui/primitive";
+import { composeEventHandlers } from "radix-ui/internal";
+import type { WithRenderPropProps } from "../../utils/Primitive";
+import { PopoverRenderContent } from "./popoverRenderPrimitives";
+import { type ScopedProps, usePopoverScope } from "./scope";
 
 export namespace AssistantModalPrimitiveContent {
   export type Element = ComponentRef<typeof PopoverPrimitive.Content>;
-  export type Props = ComponentPropsWithoutRef<
-    typeof PopoverPrimitive.Content
-  > & {
+  export type Props = WithRenderPropProps<typeof PopoverPrimitive.Content> & {
     portalProps?:
       | ComponentPropsWithoutRef<typeof PopoverPrimitive.Portal>
       | undefined;
@@ -37,7 +41,7 @@ export const AssistantModalPrimitiveContent = forwardRef<
 
     return (
       <PopoverPrimitive.Portal {...scope} {...portalProps}>
-        <PopoverPrimitive.Content
+        <PopoverRenderContent
           {...scope}
           {...props}
           ref={forwardedRef}

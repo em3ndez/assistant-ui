@@ -62,7 +62,12 @@ function TimeAxisTicks({
   });
 
   return (
-    <svg width={barWidth} height={28} className="overflow-visible">
+    <svg
+      aria-hidden="true"
+      width={barWidth}
+      height={28}
+      className="overflow-visible"
+    >
       {ticks.map(({ t, x }) => (
         <g key={x}>
           <line
@@ -110,7 +115,6 @@ export function WaterfallTimeline() {
   ) as SpanState["timeRange"];
 
   // Measure outer container width — re-attach when scroll container mounts
-  // biome-ignore lint/correctness/useExhaustiveDependencies: hasSpans triggers re-attach when scroll container mounts
   useEffect(() => {
     const el = outerRef.current;
     if (!el) return;
@@ -129,7 +133,6 @@ export function WaterfallTimeline() {
   }, [hasSpans]);
 
   // Cmd + scroll wheel zoom — re-attach when scroll container mounts
-  // biome-ignore lint/correctness/useExhaustiveDependencies: hasSpans triggers re-attach when scroll container mounts
   useEffect(() => {
     const el = scrollRef.current;
     if (!el) return;
@@ -194,14 +197,14 @@ export function WaterfallTimeline() {
 
   if (!hasSpans) {
     return (
-      <div className="rounded-lg border border-border py-12 text-center text-muted-foreground text-sm">
+      <div className="border-border text-muted-foreground rounded-lg border py-12 text-center text-sm">
         No spans recorded.
       </div>
     );
   }
 
   return (
-    <div ref={outerRef} className="rounded-lg border border-border">
+    <div ref={outerRef} className="border-border rounded-lg border">
       <div
         ref={scrollRef}
         className="overflow-auto"
@@ -209,11 +212,11 @@ export function WaterfallTimeline() {
       >
         {/* Time axis */}
         <div
-          className="sticky top-0 z-20 flex border-border border-b bg-background"
+          className="border-border bg-background sticky top-0 z-20 flex border-b"
           style={{ width: contentWidth }}
         >
           <div
-            className="sticky left-0 z-30 shrink-0 border-border border-r bg-background px-2 py-1.5 text-muted-foreground text-xs"
+            className="border-border bg-background text-muted-foreground sticky left-0 z-30 shrink-0 border-r px-2 py-1.5 text-xs"
             style={{ width: LABEL_WIDTH }}
           >
             Span
@@ -235,13 +238,15 @@ export function WaterfallTimeline() {
               }
             }}
           >
-            <SpanPrimitive.Children components={{ Span: WaterfallRow }} />
+            <SpanPrimitive.Children>
+              {() => <WaterfallRow />}
+            </SpanPrimitive.Children>
           </div>
         </WaterfallLayoutContext.Provider>
       </div>
 
       {/* Legend */}
-      <div className="flex items-center gap-4 border-border border-t px-3 py-2 text-muted-foreground text-xs">
+      <div className="border-border text-muted-foreground flex items-center gap-4 border-t px-3 py-2 text-xs">
         <div className="flex items-center gap-1.5">
           <span
             className="size-2.5 rounded-sm"

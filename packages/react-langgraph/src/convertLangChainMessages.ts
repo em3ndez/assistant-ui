@@ -1,93 +1,43 @@
 "use client";
 
-import {
+import type {
+  CompleteAttachment,
+  DataMessagePart,
+  MessageTiming,
   ThreadAssistantMessage,
-  useExternalMessageConverter,
-} from "@assistant-ui/react";
+  ThreadUserMessage,
+  ToolCallMessagePart,
+} from "@assistant-ui/core";
+import type { useExternalMessageConverter } from "@assistant-ui/core/react";
 import {
+  parseDataUrl,
+  stableStringifyToolArgs,
+  trackToolArgsKeyOrder,
+} from "@assistant-ui/core/internal";
+import {
+  convertLangChainContentBlock,
+  getCustomMetadata,
+  uiMessageToDataPart,
+  withAudioTranscript,
+} from "@assistant-ui/react-langchain/converter";
+import type {
   LangChainMessage,
   LangChainToolCall,
   LangChainToolCallChunk,
+  UIMessage,
 } from "./types";
-import { ToolCallMessagePart } from "@assistant-ui/react";
-import { ThreadUserMessage } from "@assistant-ui/react";
 import {
   parsePartialJsonObject,
-  ReadonlyJSONObject,
+  type ReadonlyJSONObject,
 } from "assistant-stream/utils";
 
 type LangGraphMessageConverterMetadata =
   useExternalMessageConverter.Metadata & {
     toolArgsKeyOrderCache?: Map<string, Map<string, string[]>>;
+    uiMessagesByParent?: Map<string, UIMessage[]>;
+    messageTiming?: Record<string, MessageTiming>;
+    attachmentsByMessageId?: Map<string, readonly CompleteAttachment[]>;
   };
-
-const hasOwn = (value: object, key: string) =>
-  Object.prototype.hasOwnProperty.call(value, key);
-
-const stabilizeToolArgsValue = (
-  value: unknown,
-  path: string,
-  keyOrderByPath: Map<string, string[]>,
-): unknown => {
-  if (Array.isArray(value)) {
-    return value.map((item, idx) =>
-      stabilizeToolArgsValue(item, `${path}[${idx}]`, keyOrderByPath),
-    );
-  }
-
-  if (value && typeof value === "object") {
-    const record = value as Record<string, unknown>;
-    const currentKeys = Object.keys(record);
-    const previousOrder = keyOrderByPath.get(path) ?? [];
-    const previousOrderSet = new Set(previousOrder);
-    const nextOrder = [
-      ...previousOrder.filter((key) => hasOwn(record, key)),
-      ...currentKeys.filter((key) => !previousOrderSet.has(key)),
-    ];
-    keyOrderByPath.set(path, nextOrder);
-
-    return Object.fromEntries(
-      nextOrder.map((key) => [
-        key,
-        stabilizeToolArgsValue(record[key], `${path}.${key}`, keyOrderByPath),
-      ]),
-    );
-  }
-
-  return value;
-};
-
-const getToolArgsKeyOrder = (
-  keyOrderCache: Map<string, Map<string, string[]>> | undefined,
-  cacheKey: string,
-): Map<string, string[]> => {
-  const keyOrderByPath = keyOrderCache?.get(cacheKey) ?? new Map();
-  keyOrderCache?.set(cacheKey, keyOrderByPath);
-  return keyOrderByPath;
-};
-
-const trackToolArgsKeyOrder = (
-  keyOrderCache: Map<string, Map<string, string[]>> | undefined,
-  cacheKey: string,
-  args: ReadonlyJSONObject,
-) => {
-  const keyOrderByPath = getToolArgsKeyOrder(keyOrderCache, cacheKey);
-  stabilizeToolArgsValue(args, "$", keyOrderByPath);
-};
-
-const stableStringifyToolArgs = (
-  keyOrderCache: Map<string, Map<string, string[]>> | undefined,
-  cacheKey: string,
-  args: ReadonlyJSONObject,
-): string => {
-  const keyOrderByPath = getToolArgsKeyOrder(keyOrderCache, cacheKey);
-  const stableArgs = stabilizeToolArgsValue(
-    args,
-    "$",
-    keyOrderByPath,
-  ) as ReadonlyJSONObject;
-  return JSON.stringify(stableArgs);
-};
 
 const getToolArgsCacheKey = (
   messageId: string | undefined,
@@ -100,17 +50,25 @@ const resolveToolCallArgs = ({
   matchingToolCallChunk,
   messageId,
   toolArgsKeyOrderCache,
+  toolCallId,
 }: {
   chunk: LangChainToolCall;
   matchingToolCallChunk: LangChainToolCallChunk | undefined;
   messageId: string | undefined;
   toolArgsKeyOrderCache: Map<string, Map<string, string[]>> | undefined;
+  toolCallId: string;
 }): Pick<ToolCallMessagePart, "args" | "argsText"> => {
-  const cacheKey = getToolArgsCacheKey(messageId, "tool", chunk.id);
+  const cacheKey = getToolArgsCacheKey(messageId, "tool", toolCallId);
+  const streamedArgsText =
+    matchingToolCallChunk?.args ?? matchingToolCallChunk?.args_json;
+  const isStreamingArglessChunk =
+    matchingToolCallChunk !== undefined &&
+    streamedArgsText === undefined &&
+    Object.keys(chunk.args).length === 0;
   const providedArgsText =
     chunk.partial_json ??
-    matchingToolCallChunk?.args ??
-    matchingToolCallChunk?.args_json;
+    streamedArgsText ??
+    (isStreamingArglessChunk ? "" : undefined);
   const argsText =
     providedArgsText ??
     stableStringifyToolArgs(toolArgsKeyOrderCache, cacheKey, chunk.args);
@@ -132,16 +90,11 @@ const resolveToolCallArgs = ({
   return { args, argsText };
 };
 
-const getCustomMetadata = (
-  additionalKwargs: Record<string, unknown> | undefined,
-): Record<string, unknown> =>
-  (additionalKwargs?.metadata as Record<string, unknown>) ?? {};
-
 const warnedMessagePartTypes = new Set<string>();
 const warnForUnknownMessagePartType = (type: string) => {
   if (
     typeof process === "undefined" ||
-    process?.env?.["NODE_ENV"] !== "development"
+    process?.env?.NODE_ENV !== "development"
   )
     return;
   if (warnedMessagePartTypes.has(type)) return;
@@ -149,88 +102,114 @@ const warnForUnknownMessagePartType = (type: string) => {
   console.warn(`Unknown message part type: ${type}`);
 };
 
+const warnedMessageTypes = new Set<string>();
+const warnForUnknownMessageType = (type: string) => {
+  if (
+    typeof process === "undefined" ||
+    process?.env?.NODE_ENV !== "development"
+  )
+    return;
+  if (warnedMessageTypes.has(type)) return;
+  warnedMessageTypes.add(type);
+  console.warn(`Unknown message type: ${type}`);
+};
+
 const contentToParts = (
   content: LangChainMessage["content"],
   metadata: LangGraphMessageConverterMetadata,
   messageId: string | undefined,
 ) => {
+  if (content == null) return [];
   if (typeof content === "string")
     return [{ type: "text" as const, text: content }];
   return content
+    .filter((part) => typeof part === "object" && part !== null)
     .map(
       (
         part,
       ):
         | (ThreadUserMessage | ThreadAssistantMessage)["content"][number]
         | null => {
-        const type = part.type;
-        switch (type) {
-          case "text":
-            return { type: "text", text: part.text };
-          case "text_delta":
-            return { type: "text", text: part.text };
-          case "image_url":
-            if (typeof part.image_url === "string") {
-              return { type: "image", image: part.image_url };
-            } else {
-              return {
-                type: "image",
-                image: part.image_url.url,
-              };
-            }
-          case "file":
-            return {
-              type: "file",
-              filename: part.file.filename,
-              data: part.file.file_data,
-              mimeType: part.file.mime_type,
-            };
-
-          case "thinking":
-            return { type: "reasoning", text: part.thinking };
-
-          case "reasoning":
-            return {
-              type: "reasoning",
-              text: part.summary.map((s) => s.text).join("\n\n\n"),
-            };
-
-          case "tool_use":
-            return null;
-          case "input_json_delta":
-            return null;
-
-          case "computer_call":
-            const args = part.action as ReadonlyJSONObject;
-            return {
-              type: "tool-call",
-              toolCallId: part.call_id,
-              toolName: "computer_call",
+        if (part.type === "computer_call") {
+          const args = part.action as ReadonlyJSONObject;
+          return {
+            type: "tool-call",
+            toolCallId: part.call_id,
+            toolName: "computer_call",
+            args,
+            argsText: stableStringifyToolArgs(
+              metadata.toolArgsKeyOrderCache,
+              getToolArgsCacheKey(messageId, "computer", part.call_id),
               args,
-              argsText: stableStringifyToolArgs(
-                metadata.toolArgsKeyOrderCache,
-                getToolArgsCacheKey(messageId, "computer", part.call_id),
-                args,
-              ),
-            };
-
-          default:
-            const _exhaustiveCheck: never = type;
-            warnForUnknownMessagePartType(_exhaustiveCheck);
-            return null;
-
-          // const _exhaustiveCheck: never = type;
-          // throw new Error(`Unknown message part type: ${_exhaustiveCheck}`);
+            ),
+          };
         }
+
+        const converted = convertLangChainContentBlock(part);
+        if (converted === undefined) {
+          warnForUnknownMessagePartType(part.type);
+          return null;
+        }
+        return converted;
       },
     )
     .filter((a) => a !== null);
 };
 
+const normalizePayload = (value: string) => parseDataUrl(value)?.data ?? value;
+
+const attachmentPartKey = (part: {
+  type: string;
+  image?: string;
+  data?: unknown;
+  audio?: { data: string };
+}): string | null => {
+  if (part.type === "image" && typeof part.image === "string")
+    return `image:${normalizePayload(part.image)}`;
+  if (part.type === "file" && typeof part.data === "string")
+    return `file:${normalizePayload(part.data)}`;
+  if (part.type === "audio" && part.audio)
+    return `file:${normalizePayload(part.audio.data)}`;
+  return null;
+};
+
+/**
+ * getMessageContent flattens attachment content into the wire message while
+ * the runtime reattaches the original attachments for chip rendering, so in
+ * the sender's session each attachment payload arrives back twice. Drops the
+ * flattened copies, at most one content part per attachment part, consuming
+ * from the trailing end because getMessageContent appends the flattened
+ * copies after the user's direct content; on reload the staging map is empty
+ * and content parts pass through untouched.
+ */
+const dropAttachmentDuplicates = (
+  parts: ReturnType<typeof contentToParts>,
+  attachments: readonly CompleteAttachment[],
+): ReturnType<typeof contentToParts> => {
+  const counts = new Map<string, number>();
+  for (const part of attachments.flatMap((a) => a.content)) {
+    const key = attachmentPartKey(part);
+    if (key) counts.set(key, (counts.get(key) ?? 0) + 1);
+  }
+  if (counts.size === 0) return parts;
+  const dropped = new Set<number>();
+  for (let i = parts.length - 1; i >= 0; i--) {
+    const key = attachmentPartKey(parts[i]!);
+    if (!key) continue;
+    const remaining = counts.get(key);
+    if (!remaining) continue;
+    counts.set(key, remaining - 1);
+    dropped.add(i);
+  }
+  if (dropped.size === 0) return parts;
+  return parts.filter((_, i) => !dropped.has(i));
+};
+
 export const convertLangChainMessages: useExternalMessageConverter.Callback<
   LangChainMessage
 > = (message, metadata: LangGraphMessageConverterMetadata = {}) => {
-  switch (message.type) {
+  const type = message.type;
+  switch (type) {
     case "system":
       return {
         role: "system",
@@ -238,29 +217,42 @@ export const convertLangChainMessages: useExternalMessageConverter.Callback<
         content: [{ type: "text", text: message.content }],
         metadata: { custom: getCustomMetadata(message.additional_kwargs) },
       };
-    case "human":
+    case "human": {
+      const attachments = message.id
+        ? metadata.attachmentsByMessageId?.get(message.id)
+        : undefined;
+      const parts = contentToParts(message.content, metadata, message.id);
       return {
         role: "user",
         id: message.id,
-        content: contentToParts(message.content, metadata, message.id),
+        content: attachments?.length
+          ? dropAttachmentDuplicates(parts, attachments)
+          : parts,
         metadata: { custom: getCustomMetadata(message.additional_kwargs) },
+        ...(attachments?.length ? { attachments } : {}),
       };
-    case "ai":
+    }
+    case "ai": {
       const toolCallParts =
-        message.tool_calls?.map((chunk): ToolCallMessagePart => {
-          const matchingToolCallChunk = message.tool_call_chunks?.find(
-            (c) => c.id === chunk.id,
+        message.tool_calls?.map((chunk, idx): ToolCallMessagePart => {
+          const fallbackIndex = chunk.index ?? idx;
+          const toolCallId = chunk.id
+            ? chunk.id
+            : `lc-toolcall-${message.id ?? "unknown"}-${fallbackIndex}`;
+          const matchingToolCallChunk = message.tool_call_chunks?.find((c) =>
+            chunk.id ? c.id === chunk.id : c.index === fallbackIndex,
           );
           const { args, argsText } = resolveToolCallArgs({
             chunk,
             matchingToolCallChunk,
             messageId: message.id,
             toolArgsKeyOrderCache: metadata.toolArgsKeyOrderCache,
+            toolCallId,
           });
 
           return {
             type: "tool-call",
-            toolCallId: chunk.id,
+            toolCallId,
             toolName: chunk.name,
             args,
             argsText,
@@ -270,7 +262,7 @@ export const convertLangChainMessages: useExternalMessageConverter.Callback<
       const normalizedContent =
         typeof message.content === "string"
           ? [{ type: "text" as const, text: message.content }]
-          : message.content;
+          : (message.content ?? []);
 
       const allContent = [
         message.additional_kwargs?.reasoning,
@@ -278,16 +270,37 @@ export const convertLangChainMessages: useExternalMessageConverter.Callback<
         ...(message.additional_kwargs?.tool_outputs ?? []),
       ].filter((c) => c !== undefined);
 
+      const uiDataParts: readonly DataMessagePart[] =
+        (message.id
+          ? metadata.uiMessagesByParent
+              ?.get(message.id)
+              ?.map(uiMessageToDataPart)
+          : undefined) ?? [];
+
+      const timing = message.id
+        ? metadata.messageTiming?.[message.id]
+        : undefined;
+
       return {
         role: "assistant",
         id: message.id,
         content: [
-          ...contentToParts(allContent, metadata, message.id),
+          ...withAudioTranscript(
+            contentToParts(allContent, metadata, message.id),
+            message.additional_kwargs,
+          ),
           ...toolCallParts,
+          ...uiDataParts,
         ],
-        metadata: { custom: getCustomMetadata(message.additional_kwargs) },
+        metadata: {
+          custom: getCustomMetadata(message.additional_kwargs),
+          ...(timing && { timing }),
+        },
         ...(message.status && { status: message.status }),
       };
+    }
+    case "remove":
+      return [];
     case "tool":
       return {
         role: "tool",
@@ -297,5 +310,12 @@ export const convertLangChainMessages: useExternalMessageConverter.Callback<
         artifact: message.artifact,
         isError: message.status === "error",
       };
+    default: {
+      const _exhaustiveCheck: never = type;
+      warnForUnknownMessageType(_exhaustiveCheck);
+      return [];
+    }
   }
 };
+
+export { getMessageContent } from "@assistant-ui/react-langchain/converter";

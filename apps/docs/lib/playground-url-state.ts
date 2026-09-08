@@ -8,17 +8,18 @@ import {
   type inferParserType,
 } from "nuqs";
 import { useCallback, useMemo } from "react";
-import { type BuilderConfig, DEFAULT_CONFIG } from "@/components/builder/types";
+import {
+  type BuilderConfig,
+  DEFAULT_CONFIG,
+} from "@/components/pages/playground/types";
 import {
   PRESETS,
   getPresetById,
   configMatchesPreset,
-} from "@/components/builder/presets";
+} from "@/components/pages/playground/presets";
 
 // Preset IDs from presets.ts
 const PRESET_IDS = PRESETS.map((p) => p.id);
-
-// ============ Diff/Merge Utilities ============
 
 /**
  * Compute the difference between config and defaults
@@ -81,8 +82,6 @@ export function applyDiff(
   return deepMerge(defaults, diff) as BuilderConfig;
 }
 
-// ============ Base64 URL-safe Encoding ============
-
 export function base64UrlEncode(str: string): string {
   if (typeof window !== "undefined") {
     const bytes = new TextEncoder().encode(str);
@@ -110,8 +109,6 @@ export function base64UrlDecode(str: string): string {
   return Buffer.from(base64, "base64").toString("utf-8");
 }
 
-// ============ Config Encode/Decode Helpers ============
-
 /**
  * Encode a BuilderConfig to a URL-safe string
  */
@@ -129,8 +126,6 @@ export function decodeConfig(encoded: string): BuilderConfig {
   const diff = JSON.parse(json) as Record<string, unknown>;
   return applyDiff(diff, DEFAULT_CONFIG);
 }
-
-// ============ Custom Parsers ============
 
 /**
  * Parser for BuilderConfig using incremental encoding + Base64
@@ -187,8 +182,6 @@ export const parseAsPreset = createParser<string>({
   },
 });
 
-// ============ Search Params Schema ============
-
 export const playgroundSearchParams = {
   preset: parseAsPreset, // Preset shortcut (e.g., ?preset=chatgpt)
   c: parseAsConfig.withDefault(DEFAULT_CONFIG), // Config (incremental encoded)
@@ -204,8 +197,6 @@ export const playgroundSearchParams = {
 export type PlaygroundSearchParams = inferParserType<
   typeof playgroundSearchParams
 >;
-
-// ============ Custom Hook ============
 
 export type ViewportPreset = "desktop" | "tablet" | "mobile";
 

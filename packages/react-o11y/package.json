@@ -1,6 +1,6 @@
 {
   "name": "@assistant-ui/react-o11y",
-  "version": "0.0.2",
+  "version": "0.0.43",
   "description": "Observability primitives for @assistant-ui",
   "keywords": [
     "observability",
@@ -15,7 +15,6 @@
   "type": "module",
   "exports": {
     ".": {
-      "aui-source": "./src/index.ts",
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
     }
@@ -29,12 +28,13 @@
   ],
   "sideEffects": false,
   "scripts": {
-    "build": "aui-build"
+    "build": "aui-build",
+    "test": "vitest run"
   },
   "dependencies": {
-    "@assistant-ui/store": "workspace:*",
-    "@assistant-ui/tap": "workspace:*",
-    "@radix-ui/react-primitive": "^2.1.4"
+    "@assistant-ui/store": "workspace:^",
+    "@assistant-ui/tap": "workspace:^",
+    "@radix-ui/react-primitive": "^2.1.10"
   },
   "peerDependencies": {
     "@types/react": "*",
@@ -47,8 +47,11 @@
   },
   "devDependencies": {
     "@assistant-ui/x-buildutils": "workspace:*",
-    "@types/react": "^19.2.14",
-    "react": "^19.2.4"
+    "@types/react": "^19.2.18",
+    "@types/react-dom": "^19.2.7",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8",
+    "vitest": "^4.1.11"
   },
   "publishConfig": {
     "access": "public",

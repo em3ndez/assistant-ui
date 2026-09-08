@@ -1,17 +1,30 @@
 "use client";
 
-import { useComposedRefs } from "@radix-ui/react-compose-refs";
-import { Primitive } from "@radix-ui/react-primitive";
+import { useComposedRefs } from "radix-ui/internal";
+import { Primitive } from "../../utils/Primitive";
 import {
   type ComponentRef,
   forwardRef,
-  ComponentPropsWithoutRef,
+  type ComponentPropsWithoutRef,
   useCallback,
+  useLayoutEffect,
+  useMemo,
 } from "react";
+import { useAuiState } from "@assistant-ui/store";
+import { useManagedRef } from "../../utils/hooks/useManagedRef";
 import { useThreadViewportAutoScroll } from "./useThreadViewportAutoScroll";
 import { ThreadPrimitiveViewportProvider } from "../../context/providers/ThreadViewportProvider";
 import { useSizeHandle } from "../../utils/hooks/useSizeHandle";
-import { useThreadViewport } from "../../context/react/ThreadViewportContext";
+import {
+  useThreadViewport,
+  useThreadViewportStore,
+} from "../../context/react/ThreadViewportContext";
+import { useTopAnchorReserve } from "./topAnchor/useTopAnchorReserve";
+import {
+  getActiveTopAnchorAnchorId,
+  getActiveTopAnchorTargetId,
+  isTopAnchorTurnValid,
+} from "./topAnchor/topAnchorTurn";
 
 export namespace ThreadPrimitiveViewport {
   export type Element = ComponentRef<typeof Primitive.div>;
@@ -30,6 +43,26 @@ export namespace ThreadPrimitiveViewport {
      * - "top": New user messages anchor at the top of the viewport for a focused reading experience.
      */
     turnAnchor?: "top" | "bottom" | undefined;
+
+    /**
+     * Clamps tall user messages so the assistant response stays in view.
+     *
+     * @default { tallerThan: "10em", visibleHeight: "6em" }
+     */
+    topAnchorMessageClamp?: {
+      /**
+       * Clamp messages taller than this. Supports `px`, `em`, and `rem`.
+       *
+       * @default "10em"
+       */
+      tallerThan?: string;
+      /**
+       * Visible portion of clamped messages. Supports `px`, `em`, and `rem`.
+       *
+       * @default "6em"
+       */
+      visibleHeight?: string;
+    };
 
     /**
      * Whether to scroll to bottom when a new run starts.
@@ -60,6 +93,59 @@ const useViewportSizeRef = () => {
   return useSizeHandle(register, getHeight);
 };
 
+const useViewportElementRef = () => {
+  const registerViewportElement = useThreadViewport(
+    (s) => s.registerViewportElement,
+  );
+
+  return useManagedRef(registerViewportElement);
+};
+
+const useTopAnchorTurn = (enabled: boolean) => {
+  const threadViewportStore = useThreadViewportStore();
+  const activeAnchorId = useAuiState((s) => {
+    if (!enabled) return undefined;
+    return getActiveTopAnchorAnchorId(s.thread);
+  });
+  const activeTargetId = useAuiState((s) => {
+    if (!enabled) return undefined;
+    return getActiveTopAnchorTargetId(s.thread);
+  });
+  const topAnchorTurn = useThreadViewport((s) => s.topAnchorTurn);
+  const activeTurn = useMemo(() => {
+    if (!activeAnchorId || !activeTargetId) return null;
+    return { anchorId: activeAnchorId, targetId: activeTargetId };
+  }, [activeAnchorId, activeTargetId]);
+
+  const topAnchorTurnIsValid = useAuiState(
+    (s) =>
+      enabled &&
+      !!topAnchorTurn &&
+      isTopAnchorTurnValid(topAnchorTurn, s.thread.messages),
+  );
+
+  useLayoutEffect(() => {
+    if (!topAnchorTurn || topAnchorTurnIsValid) return;
+
+    threadViewportStore.getState().setTopAnchorTurn(null);
+  }, [threadViewportStore, topAnchorTurn, topAnchorTurnIsValid]);
+
+  useLayoutEffect(() => {
+    if (!activeTurn) return;
+
+    const state = threadViewportStore.getState();
+    const current = state.topAnchorTurn;
+    if (
+      current?.anchorId === activeTurn.anchorId &&
+      current.targetId === activeTurn.targetId
+    ) {
+      return;
+    }
+
+    state.setTopAnchorTurn(activeTurn);
+  }, [activeTurn, threadViewportStore]);
+};
+
 const ThreadPrimitiveViewportScrollable = forwardRef<
   ThreadPrimitiveViewport.Element,
   ThreadPrimitiveViewport.Props
@@ -82,7 +168,18 @@ const ThreadPrimitiveViewportScrollable = forwardRef<
       scrollToBottomOnThreadSwitch,
     });
     const viewportSizeRef = useViewportSizeRef();
-    const ref = useComposedRefs(forwardedRef, autoScrollRef, viewportSizeRef);
+    const viewportElementRef = useViewportElementRef();
+    const threadViewportStore = useThreadViewportStore();
+    const turnAnchor = threadViewportStore.getState().turnAnchor;
+    const topAnchorEnabled = turnAnchor === "top";
+    useTopAnchorTurn(topAnchorEnabled);
+    useTopAnchorReserve(topAnchorEnabled);
+    const ref = useComposedRefs(
+      forwardedRef,
+      autoScrollRef,
+      viewportSizeRef,
+      viewportElementRef,
+    );
 
     return (
       <Primitive.div {...rest} ref={ref}>
@@ -105,16 +202,20 @@ ThreadPrimitiveViewportScrollable.displayName =
  * @example
  * ```tsx
  * <ThreadPrimitive.Viewport turnAnchor="top">
- *   <ThreadPrimitive.Messages components={{ Message: MyMessage }} />
+ *   <ThreadPrimitive.Messages>
+ *     {() => <MyMessage />}
+ *   </ThreadPrimitive.Messages>
  * </ThreadPrimitive.Viewport>
  * ```
  */
 export const ThreadPrimitiveViewport = forwardRef<
   ThreadPrimitiveViewport.Element,
   ThreadPrimitiveViewport.Props
->(({ turnAnchor, ...props }, ref) => {
+>(({ turnAnchor, topAnchorMessageClamp, ...props }, ref) => {
   return (
-    <ThreadPrimitiveViewportProvider options={{ turnAnchor }}>
+    <ThreadPrimitiveViewportProvider
+      options={{ turnAnchor, topAnchorMessageClamp }}
+    >
       <ThreadPrimitiveViewportScrollable {...props} ref={ref} />
     </ThreadPrimitiveViewportProvider>
   );

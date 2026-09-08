@@ -1,16 +1,7 @@
 ---
-title: Mem0 - ChatGPT with Memory
-description: A personalized AI chat app powered by Mem0 that remembers your preferences, facts, and memories
+title: Mem0 Memory Chat
+description: AI chat with persistent memory powered by Mem0 — remembers user preferences, facts, and history across sessions. Open-source React example built on assistant-ui.
 ---
-
-
-<div className="not-prose h-[600px]">
-  <iframe
-    title="Mem0 - ChatGPT with memory demo"
-    className="h-full w-full border-none"
-    src="https://mem0-4vmi.vercel.app/"
-  />
-</div>
 
 ## Overview
 
@@ -38,32 +29,31 @@ A personalized AI chat experience powered by Mem0 that remembers user preference
 The example integrates Mem0's memory SDK with assistant-ui:
 
 ```tsx
-import { Mem0Client } from "mem0ai";
+import MemoryClient from "mem0ai";
 
-const mem0 = new Mem0Client({
+const mem0 = new MemoryClient({
   apiKey: process.env.MEM0_API_KEY,
 });
 
 // Store memories from a conversation
 async function storeMemory(userId: string, messages: Message[]) {
-  await mem0.add({
-    messages: messages.map((m) => ({
+  await mem0.add(
+    messages.map((m) => ({
       role: m.role,
       content: m.content,
     })),
-    user_id: userId,
-  });
+    { user_id: userId },
+  );
 }
 
 // Retrieve relevant memories for context
 async function getRelevantMemories(userId: string, query: string) {
-  const memories = await mem0.search({
-    query,
+  const { results } = await mem0.search(query, {
     user_id: userId,
     limit: 10,
   });
 
-  return memories.map((m) => m.memory).join("\n");
+  return results.map((m) => m.memory).join("\n");
 }
 ```
 
@@ -87,7 +77,7 @@ ${memories}
 Use this context to personalize your responses.`;
 
   const result = streamText({
-    model: openai("gpt-4o"),
+    model: openai("gpt-5.6-luna"),
     system: systemPrompt,
     messages,
   });
@@ -95,7 +85,7 @@ Use this context to personalize your responses.`;
   // Store new memories after response
   await storeMemory(userId, messages);
 
-  return result.toDataStreamResponse();
+  return result.toUIMessageStreamResponse();
 }
 ```
 

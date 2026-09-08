@@ -1,12 +1,24 @@
 "use client";
 
-import { ComponentPropsWithoutRef, ComponentRef, forwardRef } from "react";
-import { DropdownMenu as DropdownMenuPrimitive } from "radix-ui";
-import { ScopedProps, useDropdownMenuScope } from "./scope";
+import {
+  type ComponentPropsWithoutRef,
+  type ComponentRef,
+  forwardRef,
+} from "react";
+import { Direction, DropdownMenu as DropdownMenuPrimitive } from "radix-ui";
+import { composeEventHandlers } from "radix-ui/internal";
+import type { WithRenderPropProps } from "../../utils/Primitive";
+import { DropdownMenuRenderContent } from "../dropdownMenuRenderPrimitives";
+import { useThreadListItemFocus } from "../threadListFocusGroup";
+import {
+  useThreadListItemMoreSharedFocusGroup,
+  useThreadListItemMoreSetOpen,
+} from "./ThreadListItemMoreRoot";
+import { type ScopedProps, useDropdownMenuScope } from "./scope";
 
 export namespace ThreadListItemMorePrimitiveContent {
   export type Element = ComponentRef<typeof DropdownMenuPrimitive.Content>;
-  export type Props = ComponentPropsWithoutRef<
+  export type Props = WithRenderPropProps<
     typeof DropdownMenuPrimitive.Content
   > & {
     portalProps?:
@@ -29,12 +41,27 @@ export const ThreadListItemMorePrimitiveContent = forwardRef<
     forwardedRef,
   ) => {
     const scope = useDropdownMenuScope(__scopeThreadListItemMore);
+    const setOpen = useThreadListItemMoreSetOpen();
+    const focus = useThreadListItemFocus();
+    const sharedFocusGroup = useThreadListItemMoreSharedFocusGroup();
+    const direction = Direction.useDirection();
+    const closeKey = direction === "rtl" ? "ArrowRight" : "ArrowLeft";
 
     return (
       <DropdownMenuPrimitive.Portal {...scope} {...portalProps}>
-        <DropdownMenuPrimitive.Content
+        <DropdownMenuRenderContent
           {...scope}
           {...props}
+          onKeyDown={composeEventHandlers(props.onKeyDown, (event) => {
+            if (!sharedFocusGroup || event.key !== closeKey) return;
+            event.preventDefault();
+            setOpen(false);
+            focus?.moreRef.current?.focus();
+          })}
+          onEscapeKeyDown={composeEventHandlers(props.onEscapeKeyDown, () => {
+            if (!sharedFocusGroup) return;
+            focus?.moreRef.current?.focus();
+          })}
           ref={forwardedRef}
           sideOffset={sideOffset}
         />

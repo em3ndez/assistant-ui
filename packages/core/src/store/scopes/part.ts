@@ -2,10 +2,11 @@ import type { ToolResponse } from "assistant-stream";
 import type {
   ThreadUserMessagePart,
   ThreadAssistantMessagePart,
-  MessagePartStatus,
+  ToolApprovalResponse,
   ToolCallMessagePartStatus,
-} from "../../types";
-import type { MessagePartRuntime } from "../../runtime";
+} from "../../types/message";
+import type { MessagePartStatus } from "../../types/message";
+import type { MessagePartRuntime } from "../../runtime/api/message-part-runtime";
 
 export type PartState = (ThreadUserMessagePart | ThreadAssistantMessagePart) & {
   readonly status: MessagePartStatus | ToolCallMessagePartStatus;
@@ -26,6 +27,15 @@ export type PartMethods = {
    * This is useful when a tool has requested human input and is waiting for a response.
    */
   resumeToolCall(payload: unknown): void;
+  /**
+   * Respond to a server-side tool approval gate. The approval id is read from
+   * the part. Accepts a boolean decision, the id of one of the approval's
+   * options, or a free-form answer when the request asks for one.
+   *
+   * Resolves once the runtime has accepted the response, and rejects when it
+   * could not be recorded, so a renderer can leave its controls retryable.
+   */
+  respondToToolApproval(response: ToolApprovalResponse): Promise<void>;
   __internal_getRuntime?(): MessagePartRuntime;
 };
 

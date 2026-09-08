@@ -1,13 +1,11 @@
-import type { ThreadMessage } from "../../types";
+import type { ThreadMessage } from "../../types/message";
 import type { SubscribableWithState } from "../../subscribable/subscribable";
 import type {
   ComposerRuntimeCore,
+  EditComposerRuntimeCore,
   ThreadComposerRuntimeCore,
 } from "../interfaces/composer-runtime-core";
-import type {
-  SpeechState,
-  SubmittedFeedback,
-} from "../interfaces/thread-runtime-core";
+import type { SpeechState } from "../interfaces/thread-runtime-core";
 import type { ComposerRuntimePath, MessageRuntimePath } from "./paths";
 
 export type ComposerRuntimeCoreBinding = SubscribableWithState<
@@ -21,7 +19,7 @@ export type ThreadComposerRuntimeCoreBinding = SubscribableWithState<
 >;
 
 export type EditComposerRuntimeCoreBinding = SubscribableWithState<
-  ComposerRuntimeCore | undefined,
+  EditComposerRuntimeCore | undefined,
   ComposerRuntimePath & { composerSource: "edit" }
 >;
 
@@ -33,17 +31,22 @@ export type MessageStateBinding = SubscribableWithState<
     readonly branchNumber: number;
     readonly branchCount: number;
     readonly speech: SpeechState | undefined;
-    /** @deprecated Use `message.metadata.submittedFeedback` instead. This will be removed in 0.12.0. */
-    readonly submittedFeedback: SubmittedFeedback | undefined;
   },
   MessageRuntimePath
 >;
 
 export type ThreadListItemState = {
   readonly isMain: boolean;
+  /**
+   * Whether this thread has a run in progress, including a run that continues
+   * after the user switches to another thread.
+   */
+  readonly isRunning: boolean;
   readonly id: string;
   readonly remoteId: string | undefined;
   readonly externalId: string | undefined;
   readonly status: import("../interfaces/thread-list-runtime-core").ThreadListItemStatus;
   readonly title?: string | undefined;
+  readonly lastMessageAt?: Date | undefined;
+  readonly custom?: Record<string, unknown> | undefined;
 };

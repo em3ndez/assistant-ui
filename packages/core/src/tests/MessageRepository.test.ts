@@ -3,23 +3,18 @@ import {
   MessageRepository,
   ExportedMessageRepository,
 } from "../runtime/utils/message-repository";
-import type { ThreadMessage, TextMessagePart } from "../types";
+import type { ThreadMessage } from "../types/message";
+import type { TextMessagePart } from "../types/message";
 import type { ThreadMessageLike } from "../runtime/utils/thread-message-like";
 
-// Mock generateId and generateOptimisticId to make tests deterministic
+// Mock generateId to make tests deterministic
 const mockGenerateId = vi.fn();
-const mockGenerateOptimisticId = vi.fn();
-const mockIsOptimisticId = vi.fn((id: string) =>
-  id.startsWith("__optimistic__"),
-);
 
 vi.mock("../utils/id", async (importOriginal) => {
   const original = await importOriginal<typeof import("../utils/id")>();
   return {
     ...original,
     generateId: () => mockGenerateId(),
-    generateOptimisticId: () => mockGenerateOptimisticId(),
-    isOptimisticId: (id: string) => mockIsOptimisticId(id),
   };
 });
 
@@ -57,23 +52,11 @@ describe("MessageRepository", () => {
     ...overrides,
   });
 
-  /**
-   * Creates a test CoreMessage with the given overrides.
-   */
-  const createThreadMessageLike = (overrides = {}): ThreadMessageLike => ({
-    role: "assistant",
-    content: [{ type: "text", text: "Test message" }],
-    ...overrides,
-  });
-
   beforeEach(() => {
     repository = new MessageRepository();
     // Reset mocks with predictable counter-based values
     nextMockId = 1;
     mockGenerateId.mockImplementation(() => `mock-id-${nextMockId++}`);
-    mockGenerateOptimisticId.mockImplementation(
-      () => `__optimistic__mock-id-${nextMockId++}`,
-    );
   });
 
   afterEach(() => {
@@ -125,6 +108,18 @@ describe("MessageRepository", () => {
       expect(() => {
         repository.addOrUpdateMessage("non-existent-id", message);
       }).toThrow(/Parent message not found/);
+    });
+
+    it("should throw when a message would be linked under an ancestor with the same id", () => {
+      const message = createTestMessage({ id: "message-id" });
+      repository.addOrUpdateMessage(null, message);
+
+      expect(() => {
+        repository.addOrUpdateMessage(
+          "message-id",
+          createTestMessage({ id: "message-id" }),
+        );
+      }).toThrow(/same id already exists in the parent tree/);
     });
 
     it("should retrieve all messages in the current branch", () => {
@@ -185,6 +180,24 @@ describe("MessageRepository", () => {
   });
 
   describe("Branch management", () => {
+    const createLongBranchMessages = (
+      messageCount: number,
+    ): Array<{ message: ThreadMessage; parentId: string | null }> => {
+      const messages: Array<{
+        message: ThreadMessage;
+        parentId: string | null;
+      }> = [{ message: createTestMessage({ id: "root" }), parentId: null }];
+
+      for (let index = 0; index < messageCount; index++) {
+        messages.push({
+          message: createTestMessage({ id: `branch-${index}` }),
+          parentId: index === 0 ? "root" : `branch-${index - 1}`,
+        });
+      }
+
+      return messages;
+    };
+
     it("should create multiple branches from a parent message", () => {
       const parent = createTestMessage({ id: "parent-id" });
       const branch1 = createTestMessage({ id: "branch1-id" });
@@ -226,6 +239,110 @@ describe("MessageRepository", () => {
       const messages2 = repository.getMessages();
       expect(messages2.map((m) => m.id)).toEqual(["parent-id", "branch2-id"]);
     });
+
+    it("keeps a nested branch selected when revisiting its ancestor", () => {
+      repository.addOrUpdateMessage(null, createTestMessage({ id: "r" }));
+      repository.addOrUpdateMessage("r", createTestMessage({ id: "a" }));
+      repository.addOrUpdateMessage("a", createTestMessage({ id: "x" }));
+      repository.addOrUpdateMessage("r", createTestMessage({ id: "b" }));
+      repository.addOrUpdateMessage("b", createTestMessage({ id: "y" }));
+
+      repository.switchToBranch("y");
+      expect(repository.getMessages().map((m) => m.id)).toEqual([
+        "r",
+        "b",
+        "y",
+      ]);
+
+      repository.switchToBranch("r");
+      expect(repository.getMessages().map((m) => m.id)).toEqual([
+        "r",
+        "b",
+        "y",
+      ]);
+
+      repository.switchToBranch("x");
+      repository.switchToBranch("r");
+      expect(repository.getMessages().map((m) => m.id)).toEqual([
+        "r",
+        "a",
+        "x",
+      ]);
+    });
+
+    it("keeps the selected root branch when deletion selects from the root", () => {
+      repository.addOrUpdateMessage(null, createTestMessage({ id: "a" }));
+      repository.addOrUpdateMessage("a", createTestMessage({ id: "x" }));
+      repository.addOrUpdateMessage(null, createTestMessage({ id: "b" }));
+      repository.addOrUpdateMessage("b", createTestMessage({ id: "y" }));
+
+      repository.switchToBranch("y");
+      repository.deleteMessage("y", null);
+
+      expect(repository.getMessages().map((m) => m.id)).toEqual(["b"]);
+    });
+
+    it("keeps the selected root branch after relinking a message", () => {
+      repository.addOrUpdateMessage(null, createTestMessage({ id: "a" }));
+      repository.addOrUpdateMessage("a", createTestMessage({ id: "m" }));
+      repository.addOrUpdateMessage("m", createTestMessage({ id: "x" }));
+      repository.addOrUpdateMessage(null, createTestMessage({ id: "b" }));
+      repository.addOrUpdateMessage("b", createTestMessage({ id: "m" }));
+
+      expect(repository.getMessages().map((m) => m.id)).toEqual([
+        "b",
+        "m",
+        "x",
+      ]);
+
+      repository.deleteMessage("x", null);
+
+      expect(repository.getMessages().map((m) => m.id)).toEqual(["b", "m"]);
+    });
+
+    it("keeps the selected branch when relinking an off-branch message", () => {
+      repository.addOrUpdateMessage(null, createTestMessage({ id: "a" }));
+      repository.addOrUpdateMessage("a", createTestMessage({ id: "m" }));
+      repository.addOrUpdateMessage("a", createTestMessage({ id: "n" }));
+      repository.addOrUpdateMessage(null, createTestMessage({ id: "b" }));
+      repository.addOrUpdateMessage("b", createTestMessage({ id: "n" }));
+
+      expect(repository.getMessages().map((m) => m.id)).toEqual(["a", "m"]);
+
+      repository.deleteMessage("m", null);
+
+      expect(repository.getMessages().map((m) => m.id)).toEqual(["a"]);
+    });
+
+    it("should operate on a long message history without overflowing the stack", () => {
+      const messageCount = 30_000;
+      const messages = createLongBranchMessages(messageCount);
+
+      messages.push({
+        message: createTestMessage({ id: "alternate" }),
+        parentId: "root",
+      });
+
+      repository.import({ headId: "alternate", messages });
+      repository.switchToBranch("branch-0");
+
+      expect(repository.headId).toBe(`branch-${messageCount - 1}`);
+
+      repository.deleteMessage("branch-0", "root");
+
+      expect(repository.getMessage("branch-1")).toMatchObject({
+        parentId: "root",
+        index: 1,
+      });
+      expect(repository.headId).toBe(`branch-${messageCount - 1}`);
+
+      repository.resetHead("root");
+
+      expect(repository.getMessages().map((message) => message.id)).toEqual([
+        "root",
+      ]);
+      expect(() => repository.getMessage("branch-1")).toThrow();
+    }, 20_000);
 
     it("should throw error when switching to a non-existent branch", () => {
       expect(() => {
@@ -296,53 +413,130 @@ describe("MessageRepository", () => {
   });
 
   describe("Optimistic messages", () => {
-    it("should create an optimistic message with a unique ID", () => {
-      mockGenerateOptimisticId.mockReturnValue("__optimistic__generated-id");
-
-      const coreMessage = createThreadMessageLike();
-      const optimisticId = repository.appendOptimisticMessage(
-        null,
-        coreMessage,
-      );
-
-      expect(optimisticId).toBe("__optimistic__generated-id");
-      expect(repository.getMessage(optimisticId).message.status?.type).toBe(
-        "running",
-      );
-    });
-
-    it("should create an optimistic message as a child of a specified parent", () => {
-      const parent = createTestMessage({ id: "parent-id" });
-      repository.addOrUpdateMessage(null, parent);
-
-      const coreMessage = createThreadMessageLike();
-      const optimisticId = repository.appendOptimisticMessage(
-        "parent-id",
-        coreMessage,
-      );
-
-      const result = repository.getMessage(optimisticId);
-      expect(result.parentId).toBe("parent-id");
-    });
-
-    it("should retry generating unique optimistic IDs if initial one exists", () => {
-      mockGenerateOptimisticId.mockReturnValueOnce("__optimistic__existing-id");
-
-      const existingMessage = createTestMessage({
-        id: "__optimistic__existing-id",
+    const optimistic = (overrides = {}) =>
+      createTestMessage({
+        status: { type: "running" },
+        metadata: {
+          unstable_state: null,
+          unstable_annotations: [],
+          unstable_data: [],
+          steps: [],
+          custom: {},
+          isOptimistic: true,
+        },
+        ...overrides,
       });
-      repository.addOrUpdateMessage(null, existingMessage);
 
-      mockGenerateOptimisticId.mockReturnValueOnce("__optimistic__unique-id");
+    it("excludes optimistic messages from export()", () => {
+      const parent = createTestMessage({ id: "u" });
+      repository.addOrUpdateMessage(null, parent);
+      repository.addOrUpdateMessage("u", optimistic({ id: "placeholder" }));
+      repository.resetHead("placeholder");
 
-      const coreMessage = createThreadMessageLike();
-      const optimisticId = repository.appendOptimisticMessage(
-        null,
-        coreMessage,
+      const exported = repository.export();
+
+      expect(exported.messages.map((m) => m.message.id)).toEqual(["u"]);
+      expect(repository.headId).toBe("placeholder");
+      expect(repository.canonicalHeadId).toBe("u");
+      // head was the optimistic placeholder; the exported head must fall back
+      // to the nearest persisted ancestor so it always resolves on import.
+      expect(exported.headId).toBe("u");
+    });
+
+    it("re-parents children of a skipped optimistic message in export()", () => {
+      repository.addOrUpdateMessage(null, createTestMessage({ id: "u1" }));
+      repository.addOrUpdateMessage("u1", optimistic({ id: "a1" }));
+      repository.addOrUpdateMessage(
+        "a1",
+        createTestMessage({ id: "u2", role: "user" }),
       );
+      repository.addOrUpdateMessage("u2", createTestMessage({ id: "a2" }));
+      repository.resetHead("a2");
 
-      expect(optimisticId).toBe("__optimistic__unique-id");
-      expect(mockGenerateOptimisticId).toHaveBeenCalledTimes(2);
+      const exported = repository.export();
+      const byId = new Map(exported.messages.map((m) => [m.message.id, m]));
+
+      expect([...byId.keys()].sort()).toEqual(["a2", "u1", "u2"]);
+      expect(byId.get("u2")?.parentId).toBe("u1");
+      expect(byId.get("a2")?.parentId).toBe("u2");
+
+      const restored = new MessageRepository();
+      restored.import(exported);
+      expect(restored.getMessages().map((m) => m.id)).toEqual([
+        "u1",
+        "u2",
+        "a2",
+      ]);
+    });
+
+    it("round-trips through export/import without resurrecting the placeholder", () => {
+      const parent = createTestMessage({ id: "u" });
+      const real = createTestMessage({ id: "a" });
+      repository.addOrUpdateMessage(null, parent);
+      repository.addOrUpdateMessage("u", real);
+      repository.resetHead("a");
+
+      const restored = new MessageRepository();
+      restored.import(repository.export());
+
+      expect(restored.export().messages.map((m) => m.message.id)).toEqual([
+        "u",
+        "a",
+      ]);
+    });
+
+    describe("HEAD-branch invariant", () => {
+      it("evicts an off-branch optimistic sibling when resetHead moves the head", () => {
+        // u -> { client_id (optimistic), server_id (optimistic) }. When the
+        // head moves to server_id, the dangling client_id sibling is evicted.
+        const parent = createTestMessage({ id: "u" });
+        repository.addOrUpdateMessage(null, parent);
+        repository.addOrUpdateMessage("u", optimistic({ id: "client_id" }));
+        repository.addOrUpdateMessage("u", optimistic({ id: "server_id" }));
+
+        repository.resetHead("server_id");
+
+        expect(repository.getBranches("server_id")).toEqual(["server_id"]);
+        expect(() => repository.getMessage("client_id")).toThrow();
+      });
+
+      it("keeps the optimistic message that is on the head branch", () => {
+        const parent = createTestMessage({ id: "u" });
+        repository.addOrUpdateMessage(null, parent);
+        repository.addOrUpdateMessage("u", optimistic({ id: "a" }));
+
+        repository.resetHead("a");
+
+        expect(repository.getMessage("a").message.id).toBe("a");
+      });
+
+      it("never evicts real (non-optimistic) sibling branches", () => {
+        const parent = createTestMessage({ id: "u" });
+        repository.addOrUpdateMessage(null, parent);
+        repository.addOrUpdateMessage("u", createTestMessage({ id: "a1" }));
+        repository.addOrUpdateMessage("u", createTestMessage({ id: "a2" }));
+
+        repository.resetHead("a2");
+
+        // a1 is off the head branch but not optimistic, so it survives.
+        expect(repository.getBranches("a2")).toEqual(["a1", "a2"]);
+      });
+
+      it("evicts optimistic messages from the previous branch on switchToBranch", () => {
+        // Two real branches under u; the head branch (a2) carries an optimistic
+        // child. Switching to a1 must drop the optimistic message left on a2.
+        const parent = createTestMessage({ id: "u" });
+        repository.addOrUpdateMessage(null, parent);
+        repository.addOrUpdateMessage("u", createTestMessage({ id: "a1" }));
+        repository.addOrUpdateMessage("u", createTestMessage({ id: "a2" }));
+        repository.addOrUpdateMessage("a2", optimistic({ id: "opt" }));
+        repository.resetHead("opt");
+
+        repository.switchToBranch("a1");
+
+        expect(() => repository.getMessage("opt")).toThrow();
+        expect(repository.getBranches("a1")).toEqual(["a1", "a2"]);
+      });
     });
   });
 
@@ -364,6 +558,31 @@ describe("MessageRepository", () => {
       expect(
         exported.messages.find((m) => m.message.id === "child-id")?.parentId,
       ).toBe("parent-id");
+    });
+
+    it("round-trips after reparenting under a later-added ancestor", () => {
+      const messageA = createTestMessage({ id: "A" });
+      repository.addOrUpdateMessage(null, messageA);
+      repository.addOrUpdateMessage("A", createTestMessage({ id: "B" }));
+      repository.addOrUpdateMessage("A", createTestMessage({ id: "C" }));
+      repository.addOrUpdateMessage(null, createTestMessage({ id: "X" }));
+      repository.addOrUpdateMessage("X", messageA);
+
+      const exported = repository.export();
+      expect(exported.messages.map((m) => m.message.id)).toEqual([
+        "X",
+        "A",
+        "B",
+        "C",
+      ]);
+
+      const restored = new MessageRepository();
+      restored.import(exported);
+
+      expect(restored.headId).toBe("B");
+      expect(restored.getMessages().map((m) => m.id)).toEqual(["X", "A", "B"]);
+      restored.switchToBranch("C");
+      expect(restored.getMessages().map((m) => m.id)).toEqual(["X", "A", "C"]);
     });
 
     it("should import repository state", () => {
@@ -453,6 +672,224 @@ describe("MessageRepository", () => {
     it("should handle empty message arrays", () => {
       const result = ExportedMessageRepository.fromArray([]);
       expect(result.messages).toHaveLength(0);
+    });
+  });
+
+  describe("ExportedMessageRepository auto status", () => {
+    const pendingToolCall: ThreadMessageLike = {
+      id: "a1",
+      role: "assistant",
+      content: [
+        {
+          type: "tool-call",
+          toolCallId: "t1",
+          toolName: "search",
+          args: {},
+          argsText: "{}",
+          approval: { id: "a1" },
+        },
+      ],
+    };
+
+    it("fromArray reports requires-action for an unresolved approval", () => {
+      const result = ExportedMessageRepository.fromArray([pendingToolCall]);
+      expect(result.messages[0]!.message.status).toMatchObject({
+        type: "requires-action",
+        reason: "interrupt",
+      });
+    });
+
+    it("fromBranchableArray reports requires-action for an unresolved approval", () => {
+      const result = ExportedMessageRepository.fromBranchableArray([
+        { message: pendingToolCall, parentId: null },
+      ]);
+      expect(result.messages[0]!.message.status).toMatchObject({
+        type: "requires-action",
+        reason: "interrupt",
+      });
+    });
+
+    it("fromArray reports requires-action with reason tool-calls for a resultless tool call", () => {
+      const result = ExportedMessageRepository.fromArray([
+        {
+          ...pendingToolCall,
+          content: [
+            {
+              type: "tool-call",
+              toolCallId: "t1",
+              toolName: "search",
+              args: {},
+              argsText: "{}",
+            },
+          ],
+        },
+      ]);
+      expect(result.messages[0]!.message.status).toMatchObject({
+        type: "requires-action",
+        reason: "tool-calls",
+      });
+    });
+
+    it("keeps complete for a resolved tool call", () => {
+      const result = ExportedMessageRepository.fromArray([
+        {
+          ...pendingToolCall,
+          content: [
+            {
+              type: "tool-call",
+              toolCallId: "t1",
+              toolName: "search",
+              args: {},
+              argsText: "{}",
+              result: "ok",
+            },
+          ],
+        },
+      ]);
+      expect(result.messages[0]!.message.status).toMatchObject({
+        type: "complete",
+      });
+    });
+  });
+
+  describe("ExportedMessageRepository.fromBranchableArray", () => {
+    it("should create a branching tree structure", () => {
+      const items = [
+        {
+          message: {
+            id: "user-1",
+            role: "user" as const,
+            content: [{ type: "text" as const, text: "Hello" }],
+          },
+          parentId: null,
+        },
+        {
+          message: {
+            id: "assistant-1",
+            role: "assistant" as const,
+            content: [{ type: "text" as const, text: "Hi there" }],
+          },
+          parentId: "user-1",
+        },
+        {
+          message: {
+            id: "assistant-2",
+            role: "assistant" as const,
+            content: [{ type: "text" as const, text: "Hey!" }],
+          },
+          parentId: "user-1",
+        },
+      ];
+
+      const result = ExportedMessageRepository.fromBranchableArray(items);
+
+      expect(result.messages).toHaveLength(3);
+      expect(result.messages[0]!.parentId).toBeNull();
+      expect(result.messages[0]!.message.id).toBe("user-1");
+      expect(result.messages[1]!.parentId).toBe("user-1");
+      expect(result.messages[1]!.message.id).toBe("assistant-1");
+      expect(result.messages[2]!.parentId).toBe("user-1");
+      expect(result.messages[2]!.message.id).toBe("assistant-2");
+    });
+
+    it("should support headId option", () => {
+      const items = [
+        {
+          message: {
+            id: "msg-1",
+            role: "user" as const,
+            content: [{ type: "text" as const, text: "Hello" }],
+          },
+          parentId: null,
+        },
+        {
+          message: {
+            id: "msg-2a",
+            role: "assistant" as const,
+            content: [{ type: "text" as const, text: "Branch A" }],
+          },
+          parentId: "msg-1",
+        },
+        {
+          message: {
+            id: "msg-2b",
+            role: "assistant" as const,
+            content: [{ type: "text" as const, text: "Branch B" }],
+          },
+          parentId: "msg-1",
+        },
+      ];
+
+      const result = ExportedMessageRepository.fromBranchableArray(items, {
+        headId: "msg-2b",
+      });
+
+      expect(result.headId).toBe("msg-2b");
+    });
+
+    it("should throw if a message has no id", () => {
+      const items = [
+        {
+          message: {
+            role: "user" as const,
+            content: [{ type: "text" as const, text: "Hello" }],
+          },
+          parentId: null,
+        },
+      ];
+
+      expect(() =>
+        ExportedMessageRepository.fromBranchableArray(items),
+      ).toThrow(/Each message must have an 'id' field set/);
+    });
+
+    it("should handle empty arrays", () => {
+      const result = ExportedMessageRepository.fromBranchableArray([]);
+      expect(result.messages).toHaveLength(0);
+    });
+
+    it("should work with MessageRepository.import for branch switching", () => {
+      const items = [
+        {
+          message: {
+            id: "user-1",
+            role: "user" as const,
+            content: [{ type: "text" as const, text: "Hello" }],
+          },
+          parentId: null,
+        },
+        {
+          message: {
+            id: "assistant-a",
+            role: "assistant" as const,
+            content: [{ type: "text" as const, text: "Response A" }],
+          },
+          parentId: "user-1",
+        },
+        {
+          message: {
+            id: "assistant-b",
+            role: "assistant" as const,
+            content: [{ type: "text" as const, text: "Response B" }],
+          },
+          parentId: "user-1",
+        },
+      ];
+
+      const repo = ExportedMessageRepository.fromBranchableArray(items, {
+        headId: "assistant-a",
+      });
+
+      repository.import(repo);
+
+      // Should show branch A
+      let messages = repository.getMessages();
+      expect(messages.map((m) => m.id)).toEqual(["user-1", "assistant-a"]);
+
+      // Switch to branch B
+      repository.switchToBranch("assistant-b");
+      messages = repository.getMessages();
+      expect(messages.map((m) => m.id)).toEqual(["user-1", "assistant-b"]);
     });
   });
 
@@ -602,6 +1039,23 @@ describe("MessageRepository", () => {
       expect(repository.getMessage("C").parentId).toBe("B");
 
       expect(repository.headId).toBe("C");
+    });
+
+    it("should advance the head when re-parenting onto the current head", () => {
+      repository.addOrUpdateMessage(null, createTestMessage({ id: "a" }));
+      repository.addOrUpdateMessage("a", createTestMessage({ id: "h" }));
+      repository.addOrUpdateMessage(null, createTestMessage({ id: "b" }));
+      repository.addOrUpdateMessage("b", createTestMessage({ id: "c" }));
+
+      repository.addOrUpdateMessage("h", createTestMessage({ id: "c" }));
+
+      expect(repository.getMessages().map((m) => m.id)).toEqual([
+        "a",
+        "h",
+        "c",
+      ]);
+      expect(repository.headId).toBe("c");
+      expect(repository.getMessage("c").parentId).toBe("h");
     });
   });
 });

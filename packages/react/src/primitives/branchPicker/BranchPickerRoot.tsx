@@ -1,8 +1,12 @@
 "use client";
 
-import { Primitive } from "@radix-ui/react-primitive";
-import { type ComponentRef, forwardRef, ComponentPropsWithoutRef } from "react";
-import { If } from "../message";
+import { Primitive } from "../../utils/Primitive";
+import {
+  type ComponentRef,
+  forwardRef,
+  type ComponentPropsWithoutRef,
+} from "react";
+import { AuiIf } from "@assistant-ui/store";
 
 export namespace BranchPickerPrimitiveRoot {
   export type Element = ComponentRef<typeof Primitive.div>;
@@ -38,9 +42,11 @@ export const BranchPickerPrimitiveRoot = forwardRef<
   BranchPickerPrimitiveRoot.Props
 >(({ hideWhenSingleBranch, ...rest }, ref) => {
   return (
-    <If hasBranches={hideWhenSingleBranch ? true : undefined}>
+    <AuiIf
+      condition={(s) => !hideWhenSingleBranch || s.message.branchCount >= 2}
+    >
       <Primitive.div {...rest} ref={ref} />
-    </If>
+    </AuiIf>
   );
 });
 

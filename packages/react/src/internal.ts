@@ -10,10 +10,8 @@ export {
   CompositeContextProvider,
   MessageRepository,
   BaseAssistantRuntimeCore,
-  generateId,
   AssistantRuntimeImpl,
   ThreadRuntimeImpl,
-  fromThreadMessageLike,
   getAutoStatus,
 } from "@assistant-ui/core/internal";
 export type {
@@ -23,9 +21,13 @@ export type {
 
 // React-specific (stay in react)
 export { splitLocalRuntimeOptions } from "./legacy-runtime/runtime-cores/local/LocalRuntimeOptions";
-export {
-  useToolInvocations,
-  type ToolExecutionStatus,
-} from "./legacy-runtime/runtime-cores/assistant-transport/useToolInvocations";
+export type { ToolExecutionStatus } from "@assistant-ui/core";
 
-export * from "./utils/smooth";
+export { useSmooth } from "./utils/smooth/useSmooth";
+export {
+  useSmoothStatus,
+  withSmoothContextProvider,
+} from "./utils/smooth/SmoothContext";
+
+// ComposerInput plugin registry (used by react-lexical)
+export { useComposerInputPluginRegistryOptional } from "./primitives/composer/ComposerInputPluginContext";

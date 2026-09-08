@@ -1,26 +1,56 @@
-import { resource, tapResource } from "@assistant-ui/tap";
+import { useResource, resource } from "@assistant-ui/tap";
+import type { AssistantClient, ScopesConfig } from "@assistant-ui/store";
 import type { AssistantRuntime } from "..";
 import {
-  RuntimeAdapterResource,
   baseRuntimeAdapterTransformScopes,
+  ThreadListClient,
 } from "../store/internal";
-import { attachTransformScopes } from "@assistant-ui/store";
-import { DataRenderers, Tools } from "./model-context";
+import {
+  attachTransformScopes,
+  useAssistantClientRef,
+  useAssistantScopeEffect,
+} from "@assistant-ui/store/client";
+import { DataRenderers } from "./client/DataRenderers";
+import { Tools } from "./client/Tools";
 
-export const RuntimeAdapter = resource((runtime: AssistantRuntime) =>
-  tapResource(RuntimeAdapterResource(runtime)),
-);
+const useRuntimeAdapter = (runtime: AssistantRuntime) => {
+  const clientRef = useAssistantClientRef();
 
-attachTransformScopes(RuntimeAdapter, (scopes, parent) => {
-  const result = baseRuntimeAdapterTransformScopes(scopes, parent);
+  useAssistantScopeEffect(
+    "modelContext",
+    () =>
+      runtime.registerModelContextProvider(clientRef.current!.modelContext()),
+    [runtime],
+  );
 
-  if (!result.tools && parent.tools.source === null) {
-    result.tools = Tools({});
+  return useResource(
+    ThreadListClient({
+      runtime: runtime.threads,
+      __internal_assistantRuntime: runtime,
+    }),
+  );
+};
+
+export const RuntimeAdapter = resource(useRuntimeAdapter);
+
+/**
+ * The scope defaults `RuntimeAdapter` installs when it is used as the `threads`
+ * config entry. Adapter packages that wrap a runtime in their own config entry
+ * attach this to the wrapping resource for scope parity with `RuntimeAdapter`.
+ */
+export const runtimeAdapterTransformScopes = (
+  scopes: ScopesConfig,
+  parent: AssistantClient,
+): void => {
+  baseRuntimeAdapterTransformScopes(scopes, parent);
+
+  if (!scopes.tools && parent.tools.source === null) {
+    scopes.tools = Tools({});
   }
 
-  if (!result.dataRenderers && parent.dataRenderers.source === null) {
-    result.dataRenderers = DataRenderers();
+  if (!scopes.dataRenderers && parent.dataRenderers.source === null) {
+    scopes.dataRenderers = DataRenderers();
   }
+};
 
-  return result;
-});
+attachTransformScopes(useRuntimeAdapter, runtimeAdapterTransformScopes);

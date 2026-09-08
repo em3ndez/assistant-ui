@@ -1,23 +1,25 @@
-import { useCallback, type ReactNode } from "react";
 import { Pressable, type PressableProps } from "react-native";
-import { useAui } from "@assistant-ui/store";
+import { useThreadListItemDelete } from "@assistant-ui/core/react";
 
-export type ThreadListItemDeleteProps = Omit<PressableProps, "onPress"> & {
-  children: ReactNode;
+export type ThreadListItemDeleteProps = Omit<
+  PressableProps,
+  "onPress" | "children"
+> & {
+  children: PressableProps["children"];
 };
 
 export const ThreadListItemDelete = ({
   children,
   ...pressableProps
 }: ThreadListItemDeleteProps) => {
-  const aui = useAui();
-
-  const onPress = useCallback(() => {
-    aui.threadListItem().delete();
-  }, [aui]);
+  const { delete: deleteThread } = useThreadListItemDelete();
 
   return (
-    <Pressable onPress={onPress} {...pressableProps}>
+    <Pressable
+      onPress={deleteThread}
+      accessibilityRole="button"
+      {...pressableProps}
+    >
       {children}
     </Pressable>
   );

@@ -1,7 +1,11 @@
 "use client";
 
-import { Primitive } from "@radix-ui/react-primitive";
-import { type ComponentRef, forwardRef, ComponentPropsWithoutRef } from "react";
+import { Primitive } from "../../utils/Primitive";
+import {
+  type ComponentRef,
+  forwardRef,
+  type ComponentPropsWithoutRef,
+} from "react";
 import { useAuiState } from "@assistant-ui/store";
 
 export namespace ComposerPrimitiveDictationTranscript {
@@ -17,11 +21,11 @@ export namespace ComposerPrimitiveDictationTranscript {
  *
  * @example
  * ```tsx
- * <ComposerPrimitive.If dictation>
+ * <AuiIf condition={(s) => s.composer.dictation != null}>
  *   <div className="dictation-preview">
  *     <ComposerPrimitive.DictationTranscript />
  *   </div>
- * </ComposerPrimitive.If>
+ * </AuiIf>
  * ```
  */
 export const ComposerPrimitiveDictationTranscript = forwardRef<

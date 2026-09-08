@@ -1,55 +1,69 @@
 import type {
   ThreadAssistantMessagePart,
   ThreadUserMessagePart,
-  Attachment,
   ThreadMessage,
-} from "../../types";
-import {
-  resource,
-  tapMemo,
-  tapState,
-  tapResource,
-  withKey,
-} from "@assistant-ui/tap";
+} from "../../types/message";
+import type { Attachment } from "../../types/attachment";
+import { useMemo, useState } from "react";
+import { useResource, resource, withKey } from "@assistant-ui/tap";
 import type { ClientOutput } from "@assistant-ui/store";
-import { tapClientLookup } from "@assistant-ui/store";
-import type { MessageState, PartState } from "../scopes";
+import { useClientLookup } from "@assistant-ui/store/client";
+import type { MessageState } from "../scopes/message";
+import type { PartState } from "../scopes/part";
 import { NoOpComposerClient } from "./no-op-composer-client";
+import {
+  COMPLETE_STATUS,
+  normalizePartStatus,
+} from "../../utils/normalizePartStatus";
+import { getThreadMessageText } from "../../utils/text";
 
-const ThreadMessagePartClient = resource(
-  ({
-    part,
-  }: {
-    part: ThreadAssistantMessagePart | ThreadUserMessagePart;
-  }): ClientOutput<"part"> => {
-    const state = tapMemo<PartState>(() => {
-      return {
-        ...part,
-        status: { type: "complete" },
-      };
-    }, [part]);
-
+const useThreadMessagePartClient = ({
+  part,
+  isMessageRunning,
+}: {
+  part: ThreadAssistantMessagePart | ThreadUserMessagePart;
+  isMessageRunning: boolean;
+}): ClientOutput<"part"> => {
+  const state = useMemo<PartState>(() => {
     return {
-      getState: () => state,
-      addToolResult: () => {
-        throw new Error("Not supported");
-      },
-      resumeToolCall: () => {
-        throw new Error("Not supported");
-      },
+      ...part,
+      status: isMessageRunning
+        ? (normalizePartStatus(part) ?? COMPLETE_STATUS)
+        : COMPLETE_STATUS,
     };
-  },
-);
+  }, [part, isMessageRunning]);
+
+  return {
+    getState: () => state,
+    addToolResult: () => {
+      throw new Error("Not supported");
+    },
+    resumeToolCall: () => {
+      throw new Error("Not supported");
+    },
+    respondToToolApproval: () => {
+      throw new Error("Not supported");
+    },
+  };
+};
+
+const ThreadMessagePartClient = resource(useThreadMessagePartClient);
+
+const useThreadMessageAttachmentClient = ({
+  attachment,
+}: {
+  attachment: Attachment;
+}): ClientOutput<"attachment"> => {
+  return {
+    getState: () => attachment,
+    remove: () => {
+      throw new Error("Not supported");
+    },
+  };
+};
 
 const ThreadMessageAttachmentClient = resource(
-  ({ attachment }: { attachment: Attachment }): ClientOutput<"attachment"> => {
-    return {
-      getState: () => attachment,
-      remove: () => {
-        throw new Error("Not supported");
-      },
-    };
-  },
+  useThreadMessageAttachmentClient,
 );
 export type ThreadMessageClientProps = {
   message: ThreadMessage;
@@ -59,112 +73,108 @@ export type ThreadMessageClientProps = {
   branchCount?: number;
 };
 
-export const ThreadMessageClient = resource(
-  ({
-    message,
-    index,
-    isLast = true,
-    branchNumber = 1,
-    branchCount = 1,
-  }: ThreadMessageClientProps): ClientOutput<"message"> => {
-    const [isCopiedState, setIsCopied] = tapState(false);
-    const [isHoveringState, setIsHovering] = tapState(false);
+const useThreadMessageClient = ({
+  message,
+  index,
+  isLast = true,
+  branchNumber = 1,
+  branchCount = 1,
+}: ThreadMessageClientProps): ClientOutput<"message"> => {
+  const [isCopiedState, setIsCopied] = useState(false);
+  const [isHoveringState, setIsHovering] = useState(false);
+  const isMessageRunning =
+    message.role === "assistant" && message.status.type === "running";
 
-    const parts = tapClientLookup(
-      () =>
-        message.content.map((part, idx) =>
-          withKey(
-            "toolCallId" in part && part.toolCallId != null
-              ? `toolCallId-${part.toolCallId}`
-              : `index-${idx}`,
-            ThreadMessagePartClient({ part }),
-          ),
-        ),
-      [message.content],
-    );
+  const parts = useClientLookup(
+    message.content.map((part, idx) =>
+      withKey(
+        "toolCallId" in part && part.toolCallId != null
+          ? `toolCallId-${part.toolCallId}`
+          : `index-${idx}`,
+        ThreadMessagePartClient({ part, isMessageRunning }),
+        [part, isMessageRunning],
+      ),
+    ),
+  );
 
-    const attachments = tapClientLookup(
-      () =>
-        (message.attachments ?? []).map((attachment) =>
-          withKey(attachment.id, ThreadMessageAttachmentClient({ attachment })),
-        ),
-      [message.attachments],
-    );
+  const attachments = useClientLookup(
+    (message.attachments ?? []).map((attachment) =>
+      withKey(attachment.id, ThreadMessageAttachmentClient({ attachment }), [
+        attachment,
+      ]),
+    ),
+  );
 
-    const composer = tapResource(NoOpComposerClient({ type: "edit" }));
-    const composerState = composer.getState();
+  const composer = useResource(NoOpComposerClient({ type: "edit" }));
+  const composerState = composer.getState();
 
-    const state = tapMemo<MessageState>(() => {
-      return {
-        ...message,
-        parts: parts.state,
-        composer: composerState,
-        parentId: null,
-        index,
-        isLast,
-        branchNumber,
-        branchCount,
-        speech: undefined,
-        submittedFeedback: message.metadata.submittedFeedback,
-        isCopied: isCopiedState,
-        isHovering: isHoveringState,
-      };
-    }, [
-      message,
+  const state = useMemo<MessageState>(() => {
+    return {
+      ...message,
+      parts: parts.state,
+      composer: composerState,
+      parentId: null,
       index,
-      isCopiedState,
-      isHoveringState,
       isLast,
-      parts.state,
-      composerState,
       branchNumber,
       branchCount,
-    ]);
-
-    return {
-      getState: () => state,
-      composer: () => composer,
-      part: (selector) => {
-        if ("index" in selector) {
-          return parts.get({ index: selector.index });
-        } else {
-          return parts.get({ key: `toolCallId-${selector.toolCallId}` });
-        }
-      },
-      attachment: (selector) => {
-        if ("id" in selector) {
-          return attachments.get({ key: selector.id });
-        } else {
-          return attachments.get(selector);
-        }
-      },
-      reload: () => {
-        throw new Error("Not supported in ThreadMessageProvider");
-      },
-      speak: () => {
-        throw new Error("Not supported in ThreadMessageProvider");
-      },
-      stopSpeaking: () => {
-        throw new Error("Not supported in ThreadMessageProvider");
-      },
-      submitFeedback: () => {
-        throw new Error("Not supported in ThreadMessageProvider");
-      },
-      switchToBranch: () => {
-        throw new Error("Not supported in ThreadMessageProvider");
-      },
-      getCopyText: () => {
-        return message.content
-          .map((part) => {
-            if ("text" in part && typeof part.text === "string") {
-              return part.text;
-            }
-            return "";
-          })
-          .join("\n");
-      },
-      setIsCopied,
-      setIsHovering,
+      speech: undefined,
+      isCopied: isCopiedState,
+      isHovering: isHoveringState,
     };
-  },
-);
+  }, [
+    message,
+    index,
+    isCopiedState,
+    isHoveringState,
+    isLast,
+    parts.state,
+    composerState,
+    branchNumber,
+    branchCount,
+  ]);
+
+  return {
+    getState: () => state,
+    composer: () => composer,
+    part: (selector) => {
+      if ("index" in selector) {
+        return parts.get({ index: selector.index });
+      } else {
+        return parts.get({ key: `toolCallId-${selector.toolCallId}` });
+      }
+    },
+    attachment: (selector) => {
+      if ("id" in selector) {
+        return attachments.get({ key: selector.id });
+      } else {
+        return attachments.get(selector);
+      }
+    },
+    delete: () => {
+      throw new Error("Not supported in ThreadMessageProvider");
+    },
+    reload: () => {
+      throw new Error("Not supported in ThreadMessageProvider");
+    },
+    speak: () => {
+      throw new Error("Not supported in ThreadMessageProvider");
+    },
+    stopSpeaking: () => {
+      throw new Error("Not supported in ThreadMessageProvider");
+    },
+    submitFeedback: () => {
+      throw new Error("Not supported in ThreadMessageProvider");
+    },
+    switchToBranch: () => {
+      throw new Error("Not supported in ThreadMessageProvider");
+    },
+    getCopyText: () => {
+      return getThreadMessageText(message);
+    },
+    setIsCopied,
+    setIsHovering,
+  };
+};
+
+export const ThreadMessageClient = resource(useThreadMessageClient);

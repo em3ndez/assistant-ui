@@ -8,14 +8,13 @@ import {
   memo,
   type ReactNode,
 } from "react";
+import { parseLanguageClass } from "@assistant-ui/react-markdown/code-fence";
 import type {
   CodeHeaderProps,
   ComponentsByLanguage,
   SyntaxHighlighterProps,
 } from "../types";
-import { useIsStreamdownCodeBlock } from "./PreOverride";
-
-const LANGUAGE_REGEX = /language-([^\s]+)/;
+import { useStreamdownPreProps } from "./PreOverride";
 
 type CodeProps = ComponentPropsWithoutRef<"code"> & {
   node?: Element | undefined;
@@ -31,16 +30,15 @@ interface CodeAdapterOptions {
   componentsByLanguage?: ComponentsByLanguage | undefined;
 }
 
-/**
- * Extracts code string from children.
- */
 function extractCode(children: unknown): string {
   if (typeof children === "string") return children;
-  if (!isValidElement(children)) return "";
-
-  const props = children.props as Record<string, unknown> | null;
-  if (props && typeof props["children"] === "string") {
-    return props["children"];
+  if (Array.isArray(children)) {
+    let code = "";
+    for (const child of children) code += extractCode(child);
+    return code;
+  }
+  if (isValidElement<{ children?: unknown }>(children)) {
+    return extractCode(children.props.children);
   }
   return "";
 }
@@ -65,19 +63,19 @@ export function createCodeAdapter(options: CodeAdapterOptions) {
   } = options;
 
   /**
-   * Inner component that uses the hook for inline/block detection.
+   * Inner component that uses streamdown's data-block marker
+   * for inline/block detection.
    */
   function AdaptedCodeInner({
     node,
     className,
     children,
+    "data-block": dataBlock,
     ...props
-  }: CodeProps) {
-    // Use context-based detection for inline vs block code
-    const isCodeBlock = useIsStreamdownCodeBlock();
+  }: CodeProps & { "data-block"?: string }) {
+    const preProps = useStreamdownPreProps();
 
-    if (!isCodeBlock) {
-      // Inline code - render as simple code element
+    if (!dataBlock) {
       return (
         <code
           className={`aui-streamdown-inline-code ${className ?? ""}`.trim()}
@@ -88,12 +86,8 @@ export function createCodeAdapter(options: CodeAdapterOptions) {
       );
     }
 
-    // Block code - extract language and code content
-    const match = className?.match(LANGUAGE_REGEX);
-    const language = match?.[1] ?? "";
-    const code = extractCode(children);
+    const language = parseLanguageClass(className);
 
-    // Get language-specific or fallback components
     const SyntaxHighlighter =
       componentsByLanguage[language]?.SyntaxHighlighter ??
       UserSyntaxHighlighter;
@@ -101,36 +95,53 @@ export function createCodeAdapter(options: CodeAdapterOptions) {
     const CodeHeader =
       componentsByLanguage[language]?.CodeHeader ?? UserCodeHeader;
 
-    // If user provided custom SyntaxHighlighter, use it
-    if (SyntaxHighlighter) {
+    const headerElement = CodeHeader ? (
+      <CodeHeader
+        node={node}
+        language={language}
+        code={extractCode(children)}
+      />
+    ) : null;
+
+    if (
+      SyntaxHighlighter &&
+      (children == null || typeof children === "string")
+    ) {
       return (
         <>
-          {CodeHeader && (
-            <CodeHeader node={node} language={language} code={code} />
-          )}
+          {headerElement}
           <SyntaxHighlighter
             node={node}
             components={{ Pre: DefaultPre, Code: DefaultCode }}
             language={language}
-            code={code}
+            code={children ?? ""}
           />
         </>
       );
     }
 
-    // No custom SyntaxHighlighter - return null to let streamdown handle it
-    // This signals to the adapter that we should use streamdown's default
-    return null;
+    return (
+      <>
+        {headerElement}
+        <DefaultPre {...preProps} node={node}>
+          <code className={className} {...props}>
+            {children}
+          </code>
+        </DefaultPre>
+      </>
+    );
   }
 
   const AdaptedCode = memo(AdaptedCodeInner, (prev, next) => {
     return (
       prev.className === next.className &&
+      prev["data-block"] === next["data-block"] &&
       prev.children === next.children &&
       prev.node?.position?.start.line === next.node?.position?.start.line &&
       prev.node?.position?.end.line === next.node?.position?.end.line
     );
   });
+  AdaptedCode.displayName = "AdaptedCode";
 
   return AdaptedCode;
 }

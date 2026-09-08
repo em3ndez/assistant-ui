@@ -66,6 +66,7 @@ describe("extractRunTelemetry", () => {
       {
         tool_name: "search",
         tool_call_id: "tc-1",
+        tool_source: "frontend",
         tool_args: '{"query":"test"}',
         tool_result: '{"results":["a","b"]}',
       },
@@ -100,7 +101,7 @@ describe("extractRunTelemetry", () => {
       ]),
     ])!;
     expect(result.toolCalls).toEqual([
-      { tool_name: "noop", tool_call_id: "tc-3" },
+      { tool_name: "noop", tool_call_id: "tc-3", tool_source: "frontend" },
     ]);
   });
 
@@ -166,5 +167,110 @@ describe("extractRunTelemetry", () => {
     expect(result.outputTokens).toBe(7);
     expect(result.reasoningTokens).toBe(3);
     expect(result.cachedInputTokens).toBe(2);
+  });
+
+  it("extracts reasoning and cached input tokens from AI SDK v7 details", () => {
+    const result = extractRunTelemetry([
+      assistantMsg("m-1", [{ type: "text", text: "ok" }], {
+        usage: {
+          inputTokens: 12,
+          outputTokens: 7,
+          inputTokenDetails: { cacheReadTokens: 2 },
+          outputTokenDetails: { reasoningTokens: 3 },
+        },
+      }),
+    ])!;
+
+    expect(result.inputTokens).toBe(12);
+    expect(result.outputTokens).toBe(7);
+    expect(result.reasoningTokens).toBe(3);
+    expect(result.cachedInputTokens).toBe(2);
+  });
+
+  it("resolves the model ID from the custom bag and from step metadata", () => {
+    expect(
+      extractRunTelemetry([
+        assistantMsg("m-1", [{ type: "text", text: "ok" }], {
+          custom: { modelId: "provider/from-custom" },
+        }),
+      ])!.modelId,
+    ).toBe("provider/from-custom");
+
+    expect(
+      extractRunTelemetry([
+        assistantMsg("m-2", [{ type: "text", text: "ok" }], {
+          steps: [{ response: { modelId: "provider/from-step" } }],
+        }),
+      ])!.modelId,
+    ).toBe("provider/from-step");
+
+    expect(
+      extractRunTelemetry([
+        assistantMsg("m-3", [{ type: "text", text: "ok" }], {
+          modelId: "provider/explicit",
+          steps: [{ response: { modelId: "provider/from-step" } }],
+        }),
+      ])!.modelId,
+    ).toBe("provider/explicit");
+  });
+
+  it("attaches sampling calls from metadata to matching tool calls", () => {
+    const result = extractRunTelemetry([
+      assistantMsg(
+        "m-1",
+        [
+          {
+            type: "dynamic-tool",
+            toolName: "delegate",
+            toolCallId: "tc-1",
+            state: "output-available",
+            input: { task: "summarize" },
+            output: { summary: "done" },
+          } as unknown as UIMessage["parts"][number],
+          { type: "text", text: "result" },
+        ],
+        {
+          samplingCalls: {
+            "tc-1": [
+              {
+                model_id: "gemini-2.5-flash",
+                input_tokens: 100,
+                output_tokens: 50,
+              },
+            ],
+          },
+        },
+      ),
+    ])!;
+
+    expect(result.toolCalls).toHaveLength(1);
+    expect(result.toolCalls![0]!.sampling_calls).toEqual([
+      { model_id: "gemini-2.5-flash", input_tokens: 100, output_tokens: 50 },
+    ]);
+  });
+
+  it("ignores sampling calls for non-matching tool call ids", () => {
+    const result = extractRunTelemetry([
+      assistantMsg(
+        "m-1",
+        [
+          {
+            type: "tool-search",
+            toolCallId: "tc-1",
+            state: "output-available",
+            input: {},
+            output: {},
+          } as unknown as UIMessage["parts"][number],
+          { type: "text", text: "ok" },
+        ],
+        {
+          samplingCalls: {
+            "tc-other": [{ model_id: "gemini-2.5-flash", input_tokens: 10 }],
+          },
+        },
+      ),
+    ])!;
+
+    expect(result.toolCalls![0]!.sampling_calls).toBeUndefined();
   });
 });

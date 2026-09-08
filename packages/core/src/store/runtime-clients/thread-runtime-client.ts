@@ -1,141 +1,145 @@
-import type { Unsubscribe } from "../../types";
-import { ThreadRuntimeEventType, ThreadRuntime } from "../../runtime";
+import type { Unsubscribe } from "../../types/unsubscribe";
+import type { ThreadRuntimeEventType } from "../../runtime/interfaces/thread-runtime-core";
+import type { ThreadRuntime } from "../../runtime/api/thread-runtime";
+import { useMemo, useEffect, type RefObject } from "react";
+import { useResource, resource, withKey } from "@assistant-ui/tap";
+import { liveRef } from "./liveRef";
+import type { ClientOutput } from "@assistant-ui/store";
 import {
-  resource,
-  tapResource,
-  tapMemo,
-  tapEffect,
-  type tapRef,
-  withKey,
-} from "@assistant-ui/tap";
-import {
-  type ClientOutput,
-  tapAssistantEmit,
-  tapClientLookup,
-  tapClientResource,
-} from "@assistant-ui/store";
+  useAssistantEmit,
+  useClientLookup,
+  useClientResource,
+} from "@assistant-ui/store/client";
 import { ComposerClient } from "./composer-runtime-client";
 import { MessageClient } from "./message-runtime-client";
-import { tapSubscribable } from "./tap-subscribable";
-import { ThreadState } from "../scopes";
+import { ThreadSuggestions } from "../clients/suggestions";
+import { useSubscribable } from "./useSubscribable";
+import type { ThreadState } from "../scopes/thread";
 
-const MessageClientById = resource(
-  ({
-    runtime,
-    id,
-    threadIdRef,
-  }: {
-    runtime: ThreadRuntime;
-    id: string;
-    threadIdRef: tapRef.RefObject<string>;
-  }) => {
-    const messageRuntime = tapMemo(
-      () => runtime.getMessageById(id),
-      [runtime, id],
-    );
+const useMessageClientById = ({
+  runtime,
+  id,
+  threadIdRef,
+}: {
+  runtime: ThreadRuntime;
+  id: string;
+  threadIdRef: RefObject<string>;
+}) => {
+  const messageRuntime = useMemo(
+    () => runtime.getMessageById(id),
+    [runtime, id],
+  );
 
-    return tapResource(MessageClient({ runtime: messageRuntime, threadIdRef }));
-  },
-);
+  return useResource(MessageClient({ runtime: messageRuntime, threadIdRef }));
+};
 
-export const ThreadClient = resource(
-  ({ runtime }: { runtime: ThreadRuntime }): ClientOutput<"thread"> => {
-    const runtimeState = tapSubscribable(runtime);
-    const emit = tapAssistantEmit();
+const MessageClientById = resource(useMessageClientById);
 
-    // Bind thread events to event manager
-    tapEffect(() => {
-      const unsubscribers: Unsubscribe[] = [];
+const useThreadClient = ({
+  runtime,
+}: {
+  runtime: ThreadRuntime;
+}): ClientOutput<"thread"> => {
+  const runtimeState = useSubscribable(runtime);
+  const emit = useAssistantEmit();
 
-      // Subscribe to thread events
-      const threadEvents: ThreadRuntimeEventType[] = [
-        "runStart",
-        "runEnd",
-        "initialize",
-        "modelContextUpdate",
-      ];
+  useEffect(() => {
+    const unsubscribers: Unsubscribe[] = [];
 
-      for (const event of threadEvents) {
-        const unsubscribe = runtime.unstable_on(event, () => {
-          const threadId = runtime.getState()?.threadId || "unknown";
-          emit(`thread.${event}`, {
-            threadId,
-          });
+    const threadEvents: ThreadRuntimeEventType[] = [
+      "runStart",
+      "runEnd",
+      "initialize",
+      "modelContextUpdate",
+    ];
+
+    for (const event of threadEvents) {
+      const unsubscribe = runtime.unstable_on(event, () => {
+        const threadId = runtime.getState()?.threadId || "unknown";
+        emit(`thread.${event}`, {
+          threadId,
         });
-        unsubscribers.push(unsubscribe);
-      }
+      });
+      unsubscribers.push(unsubscribe);
+    }
 
-      return () => {
-        for (const unsub of unsubscribers) unsub();
-      };
-    }, [runtime, emit]);
-
-    const threadIdRef = tapMemo(
-      () => ({
-        get current() {
-          return runtime.getState()!.threadId;
-        },
-      }),
-      [runtime],
-    );
-
-    const composer = tapClientResource(
-      ComposerClient({
-        runtime: runtime.composer,
-        threadIdRef,
-      }),
-    );
-    const messages = tapClientLookup(
-      () =>
-        runtimeState.messages.map((m) =>
-          withKey(m.id, MessageClientById({ runtime, id: m.id, threadIdRef })),
-        ),
-      [runtimeState.messages, runtime, threadIdRef],
-    );
-
-    const state = tapMemo<ThreadState>(() => {
-      return {
-        isEmpty: messages.state.length === 0 && !runtimeState.isLoading,
-        isDisabled: runtimeState.isDisabled,
-        isLoading: runtimeState.isLoading,
-        isRunning: runtimeState.isRunning,
-        capabilities: runtimeState.capabilities,
-        state: runtimeState.state,
-        suggestions: runtimeState.suggestions,
-        extras: runtimeState.extras,
-        speech: runtimeState.speech,
-
-        composer: composer.state,
-        messages: messages.state,
-      };
-    }, [runtimeState, messages, composer.state]);
-
-    return {
-      getState: () => state,
-      composer: () => composer.methods,
-      append: runtime.append,
-      startRun: runtime.startRun,
-      unstable_resumeRun: runtime.unstable_resumeRun,
-      cancelRun: runtime.cancelRun,
-      getModelContext: runtime.getModelContext,
-      export: runtime.export,
-      import: runtime.import,
-      reset: runtime.reset,
-      stopSpeaking: runtime.stopSpeaking,
-      startVoice: async () => {
-        throw new Error("startVoice is not supported in this runtime");
-      },
-      stopVoice: async () => {
-        throw new Error("stopVoice is not supported in this runtime");
-      },
-      message: (selector) => {
-        if ("id" in selector) {
-          return messages.get({ key: selector.id });
-        } else {
-          return messages.get(selector);
-        }
-      },
-      __internal_getRuntime: () => runtime,
+    return () => {
+      for (const unsub of unsubscribers) unsub();
     };
-  },
-);
+  }, [runtime, emit]);
+
+  const threadIdRef = useMemo(
+    () => liveRef(() => runtime.getState()!.threadId),
+    [runtime],
+  );
+
+  const composer = useClientResource(
+    ComposerClient({
+      runtime: runtime.composer,
+      threadIdRef,
+    }),
+  );
+  const suggestions = useClientResource(
+    ThreadSuggestions(runtimeState.suggestions),
+  );
+  const messages = useClientLookup(
+    runtimeState.messages.map((m) =>
+      withKey(m.id, MessageClientById({ runtime, id: m.id, threadIdRef }), [
+        runtime,
+        m.id,
+        threadIdRef,
+      ]),
+    ),
+  );
+
+  const state = useMemo<ThreadState>(() => {
+    return {
+      isEmpty: messages.state.length === 0 && !runtimeState.isLoading,
+      isDisabled: runtimeState.isDisabled,
+      isLoading: runtimeState.isLoading,
+      isRunning: runtimeState.isRunning,
+      capabilities: runtimeState.capabilities,
+      state: runtimeState.state,
+      suggestions: runtimeState.suggestions,
+      extras: runtimeState.extras,
+      speech: runtimeState.speech,
+      voice: runtimeState.voice,
+
+      composer: composer.state,
+      messages: messages.state,
+    };
+  }, [runtimeState, messages, composer.state]);
+
+  return {
+    getState: () => state,
+    composer: () => composer.methods,
+    suggestions: () => suggestions.methods,
+    append: runtime.append,
+    deleteMessage: runtime.deleteMessage,
+    startRun: runtime.startRun,
+    resumeRun: runtime.resumeRun,
+    importExternalState: runtime.importExternalState,
+    cancelRun: runtime.cancelRun,
+    getModelContext: runtime.getModelContext,
+    export: runtime.export,
+    import: runtime.import,
+    reset: runtime.reset,
+    stopSpeaking: runtime.stopSpeaking,
+    connectVoice: runtime.connectVoice,
+    disconnectVoice: runtime.disconnectVoice,
+    getVoiceVolume: runtime.getVoiceVolume,
+    subscribeVoiceVolume: runtime.subscribeVoiceVolume,
+    muteVoice: runtime.muteVoice,
+    unmuteVoice: runtime.unmuteVoice,
+    message: (selector) => {
+      if ("id" in selector) {
+        return messages.get({ key: selector.id });
+      } else {
+        return messages.get(selector);
+      }
+    },
+    __internal_getRuntime: () => runtime,
+  };
+};
+
+export const ThreadClient = resource(useThreadClient);

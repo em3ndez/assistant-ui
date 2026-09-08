@@ -1,16 +1,35 @@
-import { AssistantStreamChunk } from "../../AssistantStreamChunk";
+import type { AssistantStreamChunk } from "../../AssistantStreamChunk";
 import { promiseWithResolvers } from "../../../utils/promiseWithResolvers";
 
 type MergeStreamItem = {
   reader: ReadableStreamDefaultReader<AssistantStreamChunk>;
+  pipeTask?: Promise<unknown> | undefined;
   promise?: Promise<unknown> | undefined;
 };
 
 export const createMergeStream = () => {
   const list: MergeStreamItem[] = [];
   let sealed = false;
+  let cancelled = false;
+  let errored = false;
   let controller: ReadableStreamDefaultController<AssistantStreamChunk>;
   let currentPull: ReturnType<typeof promiseWithResolvers<void>> | undefined;
+  let cleanupPromise: Promise<void> | undefined;
+
+  const cancelAllReaders = () => {
+    // Repeated cancellation must wait for cleanup already in progress.
+    cleanupPromise ??= Promise.all(
+      list.splice(0).map(async (item) => {
+        try {
+          await item.reader.cancel().catch(() => undefined);
+          await item.pipeTask;
+        } finally {
+          item.reader.releaseLock();
+        }
+      }),
+    ).then(() => undefined);
+    return cleanupPromise;
+  };
 
   const handlePull = (item: MergeStreamItem) => {
     if (!item.promise) {
@@ -23,8 +42,11 @@ export const createMergeStream = () => {
         .read()
         .then(({ done, value }) => {
           item.promise = undefined;
+          if (cancelled || errored) return;
+
           if (done) {
             list.splice(list.indexOf(item), 1);
+            item.reader.releaseLock();
             if (sealed && list.length === 0) {
               controller.close();
             }
@@ -36,12 +58,11 @@ export const createMergeStream = () => {
           currentPull = undefined;
         })
         .catch((e) => {
-          console.error(e);
+          if (cancelled || errored) return;
 
-          list.forEach((item) => {
-            item.reader.cancel();
-          });
-          list.length = 0;
+          errored = true;
+          console.error(e);
+          void cancelAllReaders();
 
           controller.error(e);
 
@@ -63,11 +84,12 @@ export const createMergeStream = () => {
 
       return currentPull.promise;
     },
-    cancel() {
-      list.forEach((item) => {
-        item.reader.cancel();
-      });
-      list.length = 0;
+    async cancel() {
+      cancelled = true;
+      const cleanup = cancelAllReaders();
+      currentPull?.resolve();
+      currentPull = undefined;
+      await cleanup;
     },
   });
 
@@ -76,17 +98,35 @@ export const createMergeStream = () => {
     isSealed() {
       return sealed;
     },
+    isCancelled() {
+      return cancelled;
+    },
+    isErrored() {
+      return errored;
+    },
     seal() {
+      if (sealed || cancelled || errored) return;
       sealed = true;
       if (list.length === 0) controller.close();
     },
-    addStream(stream: ReadableStream<AssistantStreamChunk>) {
-      if (sealed)
+    addStream(
+      stream: ReadableStream<AssistantStreamChunk>,
+      pipeTask?: Promise<unknown>,
+    ) {
+      const handledPipeTask = pipeTask?.catch(() => undefined);
+      if (cancelled || errored) {
+        void stream.cancel().catch(() => undefined);
+        return;
+      }
+
+      if (sealed) {
+        void stream.cancel().catch(() => undefined);
         throw new Error(
           "Cannot add streams after the run callback has settled.",
         );
+      }
 
-      const item = { reader: stream.getReader() };
+      const item = { reader: stream.getReader(), pipeTask: handledPipeTask };
       list.push(item);
       handlePull(item);
     },

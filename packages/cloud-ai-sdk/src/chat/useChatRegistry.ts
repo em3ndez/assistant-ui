@@ -1,4 +1,4 @@
-import { useRef } from "react";
+import { useEffect, useInsertionEffect, useMemo, useRef } from "react";
 import type { Chat } from "@ai-sdk/react";
 import type { UIMessage } from "@ai-sdk/react";
 import { ChatRegistry } from "./ChatRegistry";
@@ -11,49 +11,60 @@ function createSessionId(): string {
 }
 
 type UseChatRegistryOptions = {
+  scope: object;
   threadId: string | null;
   createChat: (chatKey: string, registry: ChatRegistry) => Chat<UIMessage>;
+  createRenderChat?:
+    | ((chatKey: string, registry: ChatRegistry) => Chat<UIMessage>)
+    | undefined;
 };
 
+function createRegistry(
+  createChat: UseChatRegistryOptions["createChat"],
+): ChatRegistry {
+  let registry: ChatRegistry;
+  registry = new ChatRegistry((chatKey) => createChat(chatKey, registry));
+  return registry;
+}
+
 export function useChatRegistry({
+  scope,
   threadId,
   createChat,
+  createRenderChat = createChat,
 }: UseChatRegistryOptions): {
   registry: ChatRegistry;
   activeChat: Chat<UIMessage>;
 } {
-  // Ref ensures registry always delegates to the latest createChat,
-  // even if core is recreated (e.g. cloud identity change).
-  const createChatRef = useRef(createChat);
-  createChatRef.current = createChat;
-
-  const registryRef = useRef<ChatRegistry | null>(null);
-  if (!registryRef.current) {
-    registryRef.current = new ChatRegistry((chatKey) =>
-      createChatRef.current(chatKey, registryRef.current!),
-    );
-  }
-  const registry = registryRef.current;
-
-  const freshSessionKey = useRef<string | null>(null);
-  if (!freshSessionKey.current) {
-    freshSessionKey.current = createSessionId();
-  }
-
-  // When the user navigates away from a thread (threadId goes null),
-  // generate a fresh session key so the next new-chat gets its own Chat instance.
-  const prevThreadId = useRef<string | null>(threadId);
-  if (threadId === null && prevThreadId.current !== null) {
-    freshSessionKey.current = createSessionId();
-  }
-  prevThreadId.current = threadId;
-
+  const scopedRegistry = useMemo(
+    () => ({ scope, registry: createRegistry(createChat) }),
+    [scope, createChat],
+  );
+  const registry = scopedRegistry.registry;
+  const isNewThread = threadId === null;
+  const freshSession = useMemo(
+    () => ({ scope, isNewThread, key: createSessionId() }),
+    [scope, isNewThread],
+  );
   const activeChatKey = threadId
     ? (registry.getChatKeyForThread(threadId) ?? threadId)
-    : (freshSessionKey.current ??
-      (freshSessionKey.current = createSessionId()));
+    : freshSession.key;
 
-  const activeChat = registry.getOrCreate(activeChatKey, threadId);
+  const activeChat =
+    registry.get(activeChatKey) ?? createRenderChat(activeChatKey, registry);
+
+  useInsertionEffect(() => {
+    registry.register(activeChatKey, threadId, activeChat);
+  }, [activeChat, activeChatKey, registry, threadId]);
+
+  const committedRegistryRef = useRef(registry);
+  useEffect(() => {
+    const previousRegistry = committedRegistryRef.current;
+    committedRegistryRef.current = registry;
+    if (previousRegistry !== registry) {
+      void previousRegistry.stopAll();
+    }
+  }, [registry]);
 
   return { registry, activeChat };
 }

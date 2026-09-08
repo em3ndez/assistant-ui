@@ -1,13 +1,22 @@
-import { AssistantStream } from "../AssistantStream";
-import { AssistantStreamChunk } from "../AssistantStreamChunk";
-import { ToolResponseLike } from "../tool/ToolResponse";
-import { ReadonlyJSONValue } from "../../utils/json/json-value";
-import { UnderlyingReadable } from "../utils/stream/UnderlyingReadable";
-import { createTextStream, TextStreamController } from "./text";
+import type { AssistantStream } from "../AssistantStream";
+import type { AssistantStreamChunk } from "../AssistantStreamChunk";
+import { NO_RESULT, type ToolResponseLike } from "../tool/ToolResponse";
+import type { ReadonlyJSONValue } from "../../utils/json/json-value";
+import type { UnderlyingReadable } from "../utils/stream/UnderlyingReadable";
+import { createTextStream, type TextStreamController } from "./text";
+import { closeIfOpen, enqueueIfOpen } from "../utils/stream/controller-guards";
+import {
+  createControllerStream,
+  createControllerStreamPair,
+} from "../utils/stream/createControllerStream";
 
 export type ToolCallStreamController = {
   argsText: TextStreamController;
 
+  /**
+   * Sets the tool response and settles the part. The part closes automatically
+   * and subsequent calls are ignored.
+   */
   setResponse(response: ToolResponseLike<ReadonlyJSONValue>): void;
   close(): void;
 };
@@ -16,9 +25,12 @@ class ToolCallStreamControllerImpl implements ToolCallStreamController {
   private _isClosed = false;
 
   private _mergeTask: Promise<void>;
+  private _controller: ReadableStreamDefaultController<AssistantStreamChunk>;
+
   constructor(
-    private _controller: ReadableStreamDefaultController<AssistantStreamChunk>,
+    _controller: ReadableStreamDefaultController<AssistantStreamChunk>,
   ) {
+    this._controller = _controller;
     const stream = createTextStream({
       start: (c) => {
         this._argsTextController = c;
@@ -32,19 +44,19 @@ class ToolCallStreamControllerImpl implements ToolCallStreamController {
           switch (chunk.type) {
             case "text-delta":
               hasArgsText = true;
-              this._controller.enqueue(chunk);
+              enqueueIfOpen(this._controller, chunk);
               break;
 
             case "part-finish":
               if (!hasArgsText) {
                 // if no argsText was provided, assume empty object
-                this._controller.enqueue({
+                enqueueIfOpen(this._controller, {
                   type: "text-delta",
                   textDelta: "{}",
                   path: [],
                 });
               }
-              this._controller.enqueue({
+              enqueueIfOpen(this._controller, {
                 type: "tool-call-args-text-finish",
                 path: [],
               });
@@ -65,18 +77,29 @@ class ToolCallStreamControllerImpl implements ToolCallStreamController {
   private _argsTextController!: TextStreamController;
 
   async setResponse(response: ToolResponseLike<ReadonlyJSONValue>) {
-    this._argsTextController.close();
-    await Promise.resolve(); // flush microtask queue
-    // TODO switch argsTextController to be something that doesn'#t require this
-    this._controller.enqueue({
+    if (this._isClosed) return;
+
+    // Wire decoders hand this a raw payload, so an omitted result is
+    // materialized here rather than reaching the message part as a settled call
+    // indistinguishable from one that never finished.
+    const result = response.result;
+
+    enqueueIfOpen(this._controller, {
       type: "result",
       path: [],
       ...(response.artifact !== undefined
         ? { artifact: response.artifact }
         : {}),
-      result: response.result,
+      result: result === undefined ? NO_RESULT : result,
       isError: response.isError ?? false,
+      ...(response.modelContent !== undefined
+        ? { modelContent: response.modelContent }
+        : {}),
+      ...(response.messages !== undefined
+        ? { messages: response.messages }
+        : {}),
     });
+    await this.close();
   }
 
   async close() {
@@ -86,36 +109,26 @@ class ToolCallStreamControllerImpl implements ToolCallStreamController {
     this._argsTextController.close();
     await this._mergeTask;
 
-    this._controller.enqueue({
+    enqueueIfOpen(this._controller, {
       type: "part-finish",
       path: [],
     });
-    this._controller.close();
+    closeIfOpen(this._controller);
   }
 }
 
 export const createToolCallStream = (
   readable: UnderlyingReadable<ToolCallStreamController>,
 ): AssistantStream => {
-  return new ReadableStream({
-    start(c) {
-      return readable.start?.(new ToolCallStreamControllerImpl(c));
-    },
-    pull(c) {
-      return readable.pull?.(new ToolCallStreamControllerImpl(c));
-    },
-    cancel(c) {
-      return readable.cancel?.(c);
-    },
-  });
+  return createControllerStream(
+    readable,
+    (controller) => new ToolCallStreamControllerImpl(controller),
+  );
 };
 
 export const createToolCallStreamController = () => {
-  let controller!: ToolCallStreamController;
-  const stream = createToolCallStream({
-    start(c) {
-      controller = c;
-    },
-  });
-  return [stream, controller] as const;
+  return createControllerStreamPair<
+    AssistantStreamChunk,
+    ToolCallStreamController
+  >((controller) => new ToolCallStreamControllerImpl(controller));
 };

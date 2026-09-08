@@ -1,23 +1,39 @@
 "use client";
 
-import { FC, memo, PropsWithChildren, useEffect } from "react";
-import { AssistantClient, useAui } from "@assistant-ui/store";
-import { AssistantRuntime } from "./runtime/AssistantRuntime";
+import { type FC, memo, type PropsWithChildren, useEffect } from "react";
+import {
+  type AssistantClient,
+  type AuiConfig,
+  useAui,
+} from "@assistant-ui/store";
+import type { AssistantRuntime } from "./runtime/AssistantRuntime";
 import { AssistantProviderBase } from "@assistant-ui/core/react";
 import { ThreadPrimitiveViewportProvider } from "../context/providers/ThreadViewportProvider";
-import { DevToolsProviderApi } from "../devtools";
+import { DevToolsProviderApi } from "../devtools/DevToolsHooks";
 
 export namespace AssistantRuntimeProvider {
   export type Props = PropsWithChildren<{
     /**
-     * The runtime to provide to the rest of your app.
+     * The assistant runtime to expose to descendants. Build one with
+     * `useLocalRuntime`, `useExternalStoreRuntime`, or
+     * `useAssistantTransportRuntime`.
      */
     runtime: AssistantRuntime;
 
     /**
-     * The aui instance to extend. If not provided, a new aui instance will be created.
+     * Optional parent `AssistantClient` whose scopes are inherited by the
+     * client created for this runtime. Use this when nesting an
+     * `AssistantRuntimeProvider` inside another assistant context. Omit this
+     * prop when there is no parent client.
+     * @defaultValue undefined
      */
     aui?: AssistantClient;
+
+    /**
+     * Optional extra scopes provided alongside the runtime's `threads`
+     * scope; build with `AuiConfig`.
+     */
+    config?: AuiConfig;
   }>;
 }
 
@@ -33,9 +49,9 @@ const DevToolsRegistration: FC = () => {
 
 export const AssistantRuntimeProviderImpl: FC<
   AssistantRuntimeProvider.Props
-> = ({ children, aui, runtime }) => {
+> = ({ children, aui, config, runtime }) => {
   return (
-    <AssistantProviderBase runtime={runtime} aui={aui ?? null}>
+    <AssistantProviderBase runtime={runtime} aui={aui ?? null} config={config}>
       <DevToolsRegistration />
       {/* TODO temporarily allow accessing viewport state from outside the viewport */}
       {/* TODO figure out if this behavior should be deprecated, since it is quite hacky */}

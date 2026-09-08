@@ -10,6 +10,8 @@ export const registryItemTypeSchema = z.enum([
   "registry:hook",
   "registry:theme",
   "registry:page",
+  "registry:file",
+  "registry:item",
 ]);
 
 export const registryItemFileSchema = z.object({
@@ -18,16 +20,6 @@ export const registryItemFileSchema = z.object({
   content: z.string().optional(),
   type: registryItemTypeSchema,
   target: z.string().optional(),
-});
-
-export const registryItemTailwindSchema = z.object({
-  config: z
-    .object({
-      content: z.array(z.string()).optional(),
-      theme: z.record(z.string(), z.any()).optional(),
-      plugins: z.array(z.string()).optional(),
-    })
-    .optional(),
 });
 
 export const registryItemCssVarsSchema = z.object({
@@ -39,16 +31,26 @@ export const registryItemCssVarsSchema = z.object({
 export const registryItemSchema = z.object({
   name: z.string(),
   type: registryItemTypeSchema,
+  title: z.string().optional(),
   description: z.string().optional(),
   dependencies: z.array(z.string()).optional(),
   devDependencies: z.array(z.string()).optional(),
   registryDependencies: z.array(z.string()).optional(),
+  registryDependencyUsageExemptions: z
+    .record(z.string(), z.string().trim().min(1))
+    .optional(),
+  bundledRegistryDependencies: z.array(z.string()).optional(),
+  radixRegistryDependencies: z.array(z.string()).optional(),
+  baseRegistryDependencies: z.array(z.string()).optional(),
+  radixDependencies: z.array(z.string()).optional(),
+  baseDependencies: z.array(z.string()).optional(),
   files: z.array(registryItemFileSchema).optional(),
-  tailwind: registryItemTailwindSchema.optional(),
   cssVars: registryItemCssVarsSchema.optional(),
   css: z.record(z.string(), z.any()).optional(),
   meta: z.record(z.string(), z.any()).optional(),
   docs: z.string().optional(),
 });
+
+export const registrySchema = z.array(registryItemSchema);
 
 export type RegistryItem = z.infer<typeof registryItemSchema>;

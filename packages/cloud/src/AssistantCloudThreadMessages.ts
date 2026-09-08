@@ -1,5 +1,15 @@
-import { ReadonlyJSONObject } from "assistant-stream/utils";
-import { AssistantCloudAPI } from "./AssistantCloudAPI";
+import type { ReadonlyJSONObject } from "assistant-stream/utils";
+import type { AssistantCloudAPI } from "./AssistantCloudAPI";
+import {
+  readCloudArray,
+  readCloudEnum,
+  readCloudInteger,
+  readCloudJSONObject,
+  readCloudNullableString,
+  readCloudRecord,
+  readCloudString,
+  readCloudTimestamp,
+} from "./cloudResponse";
 
 export type CloudMessage = {
   id: string;
@@ -13,6 +23,8 @@ export type CloudMessage = {
 
 type AssistantCloudThreadMessageListQuery = {
   format?: string;
+  limit?: number;
+  after?: string;
 };
 
 type AssistantCloudThreadMessageListResponse = {
@@ -33,27 +45,75 @@ type AssistantCloudThreadMessageUpdateBody = {
   content: ReadonlyJSONObject;
 };
 
+const MESSAGE_FEEDBACK_TYPES = ["positive", "negative"] as const;
+
+export type AssistantCloudThreadMessageFeedbackBody = {
+  type: "positive" | "negative";
+};
+
+export type AssistantCloudThreadMessageFeedbackResponse = {
+  feedback_id: string;
+  type: "positive" | "negative";
+};
+
+export const decodeCloudMessage = (
+  value: unknown,
+  field: string,
+): CloudMessage => {
+  const message = readCloudRecord(value, field);
+  return {
+    id: readCloudString(message.id, `${field}.id`),
+    parent_id: readCloudNullableString(message.parent_id, `${field}.parent_id`),
+    height: readCloudInteger(message.height, `${field}.height`),
+    created_at: readCloudTimestamp(message.created_at, `${field}.created_at`),
+    updated_at: readCloudTimestamp(message.updated_at, `${field}.updated_at`),
+    format: readCloudString(message.format, `${field}.format`),
+    content: readCloudJSONObject(message.content, `${field}.content`),
+  };
+};
+
 export class AssistantCloudThreadMessages {
-  constructor(private cloud: AssistantCloudAPI) {}
+  private cloud: AssistantCloudAPI;
+
+  constructor(cloud: AssistantCloudAPI) {
+    this.cloud = cloud;
+  }
 
   public async list(
     threadId: string,
     query?: AssistantCloudThreadMessageListQuery,
   ): Promise<AssistantCloudThreadMessageListResponse> {
-    return this.cloud.makeRequest(
-      `/threads/${encodeURIComponent(threadId)}/messages`,
-      { query },
+    const response = readCloudRecord(
+      await this.cloud.makeRequest(
+        `/threads/${encodeURIComponent(threadId)}/messages`,
+        { query },
+      ),
+      "thread message list response",
     );
+    const messages = readCloudArray(response.messages, "messages");
+
+    return {
+      messages: messages.map((message, index) =>
+        decodeCloudMessage(message, `messages[${index}]`),
+      ),
+    };
   }
 
   public async create(
     threadId: string,
     body: AssistantCloudThreadMessageCreateBody,
   ): Promise<AssistantCloudMessageCreateResponse> {
-    return this.cloud.makeRequest(
-      `/threads/${encodeURIComponent(threadId)}/messages`,
-      { method: "POST", body },
+    const response = readCloudRecord(
+      await this.cloud.makeRequest(
+        `/threads/${encodeURIComponent(threadId)}/messages`,
+        { method: "POST", body },
+      ),
+      "thread message create response",
     );
+
+    return {
+      message_id: readCloudString(response.message_id, "message_id"),
+    };
   }
 
   public async update(
@@ -65,5 +125,24 @@ export class AssistantCloudThreadMessages {
       `/threads/${encodeURIComponent(threadId)}/messages/${encodeURIComponent(messageId)}`,
       { method: "PUT", body },
     );
+  }
+
+  public async feedback(
+    threadId: string,
+    messageId: string,
+    body: AssistantCloudThreadMessageFeedbackBody,
+  ): Promise<AssistantCloudThreadMessageFeedbackResponse> {
+    const response = readCloudRecord(
+      await this.cloud.makeRequest(
+        `/threads/${encodeURIComponent(threadId)}/messages/${encodeURIComponent(messageId)}/feedback`,
+        { method: "POST", body },
+      ),
+      "thread message feedback response",
+    );
+
+    return {
+      feedback_id: readCloudString(response.feedback_id, "feedback_id"),
+      type: readCloudEnum(response.type, "type", MESSAGE_FEEDBACK_TYPES),
+    };
   }
 }

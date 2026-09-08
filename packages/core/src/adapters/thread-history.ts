@@ -6,10 +6,7 @@ import type {
   ExportedMessageRepository,
   ExportedMessageRepositoryItem,
 } from "../runtime/utils/message-repository";
-
-// =============================================================================
-// Message Format Adapter
-// =============================================================================
+import type { ReadonlyJSONValue } from "assistant-stream/utils";
 
 export interface MessageStorageEntry<TPayload> {
   id: string;
@@ -40,17 +37,16 @@ export interface MessageFormatAdapter<
   getId(message: TMessage): string;
 }
 
-// =============================================================================
-// Thread History Adapter
-// =============================================================================
-
 export type GenericThreadHistoryAdapter<TMessage> = {
   load(): Promise<MessageFormatRepository<TMessage>>;
+  /** Snapshot the current thread so later writes survive a switch. */
+  pin?(): void;
   append(item: MessageFormatItem<TMessage>): Promise<void>;
   update?(
     item: MessageFormatItem<TMessage>,
     localMessageId: string,
   ): Promise<void>;
+  delete?(items: MessageFormatItem<TMessage>[]): Promise<void>;
   reportTelemetry?(
     items: MessageFormatItem<TMessage>[],
     options?: {
@@ -61,11 +57,26 @@ export type GenericThreadHistoryAdapter<TMessage> = {
 };
 
 export type ThreadHistoryAdapter = {
-  load(): Promise<ExportedMessageRepository & { unstable_resume?: boolean }>;
+  load(): Promise<
+    ExportedMessageRepository & {
+      state?: ReadonlyJSONValue;
+      unstable_resume?: boolean;
+    }
+  >;
   resume?(
     options: ChatModelRunOptions,
   ): AsyncGenerator<ChatModelRunResult, void, unknown>;
   append(item: ExportedMessageRepositoryItem): Promise<void>;
+  /**
+   * Rewrites a previously appended message in place, keyed by its message id.
+   * Adapters that implement this let a runtime persist a run paused for tool
+   * approval and finalize the same message once the run resumes. An update may
+   * arrive for an id whose earlier write failed; treat it as an upsert keyed
+   * on the message id rather than assuming the entry exists.
+   */
+  update?(item: ExportedMessageRepositoryItem): Promise<void>;
+  delete?(items: ExportedMessageRepositoryItem[]): Promise<void>;
+  /** Required when used with `useAISDKRuntime` / `useChatRuntime`. */
   withFormat?<TMessage, TStorageFormat extends Record<string, unknown>>(
     formatAdapter: MessageFormatAdapter<TMessage, TStorageFormat>,
   ): GenericThreadHistoryAdapter<TMessage>;

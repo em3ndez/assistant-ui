@@ -1,18 +1,21 @@
 import sjson from "secure-json-parse";
-import { AssistantStreamChunk } from "../AssistantStreamChunk";
+import type { AssistantStreamChunk } from "../AssistantStreamChunk";
 import {
-  AssistantMetaStreamChunk,
+  type AssistantMetaStreamChunk,
   AssistantMetaTransformStream,
 } from "../utils/stream/AssistantMetaTransformStream";
 import { PipeableTransformStream } from "../utils/stream/PipeableTransformStream";
-import {
+import { enqueueIfOpen } from "../utils/stream/controller-guards";
+import type {
   ReadonlyJSONObject,
   ReadonlyJSONValue,
 } from "../../utils/json/json-value";
 import { ToolResponse } from "./ToolResponse";
 import { withPromiseOrValue } from "../utils/withPromiseOrValue";
 import { ToolCallReaderImpl } from "./ToolCallReader";
-import { ToolCallReader } from "./tool-types";
+import type { ToolCallReader } from "./tool-types";
+
+const TOOL_EXECUTION_ID = Symbol.for("assistant-stream.tool-execution-id");
 
 type ToolCallback = (toolCall: {
   toolCallId: string;
@@ -41,62 +44,145 @@ type ToolExecutionOptions = {
   onExecutionEnd?: ((toolCallId: string, toolName: string) => void) | undefined;
 };
 
+type InternalToolExecutionOptions = {
+  execute: (toolCall: {
+    toolCallId: string;
+    toolName: string;
+    args: ReadonlyJSONObject;
+    executionId: symbol;
+  }) =>
+    | Promise<ToolResponse<ReadonlyJSONValue>>
+    | ToolResponse<ReadonlyJSONValue>
+    | undefined;
+  streamCall: <
+    TArgs extends ReadonlyJSONObject = ReadonlyJSONObject,
+    TResult extends ReadonlyJSONValue = ReadonlyJSONValue,
+  >(toolCall: {
+    reader: ToolCallReader<TArgs, TResult>;
+    toolCallId: string;
+    toolName: string;
+    executionId: symbol;
+  }) => void;
+  onExecutionStart?:
+    | ((toolCallId: string, toolName: string, executionId: symbol) => void)
+    | undefined;
+  onExecutionEnd?:
+    | ((toolCallId: string, toolName: string, executionId: symbol) => void)
+    | undefined;
+};
+
+const invokeExecutionCallback = (
+  name: "onExecutionStart" | "onExecutionEnd",
+  callback:
+    | ((toolCallId: string, toolName: string, executionId: symbol) => void)
+    | undefined,
+  toolCallId: string,
+  toolName: string,
+  executionId: symbol,
+) => {
+  try {
+    const result = callback?.(toolCallId, toolName, executionId) as unknown;
+    void Promise.resolve(result).catch((error) => {
+      console.error(
+        `[assistant-stream] ${name} callback threw an error`,
+        error,
+      );
+    });
+  } catch (error) {
+    console.error(`[assistant-stream] ${name} callback threw an error`, error);
+  }
+};
+
+const pathKey = (path: readonly number[]) => path.join(",");
+
+const withExecutionId = <T extends object>(
+  chunk: T,
+  executionId: symbol,
+): T => {
+  const result = { ...chunk };
+  Object.defineProperty(result, TOOL_EXECUTION_ID, {
+    value: executionId,
+    enumerable: true,
+  });
+  return result;
+};
+
 export class ToolExecutionStream extends PipeableTransformStream<
   AssistantStreamChunk,
   AssistantStreamChunk
 > {
   constructor(options: ToolExecutionOptions) {
-    const toolCallPromises = new Map<string, PromiseLike<void>>();
+    const internalOptions = options as unknown as InternalToolExecutionOptions;
+    const toolCallPromises = new Map<symbol, PromiseLike<void>>();
     const toolCallControllers = new Map<
-      string,
+      symbol,
       ToolCallReaderImpl<ReadonlyJSONObject, ReadonlyJSONValue>
     >();
+    const toolCallIdsWithBackendResult = new Set<symbol>();
+    const executionIdsByPath = new Map<string, symbol>();
+    let nextPartIndex = 0;
 
     super((readable) => {
       const transform = new TransformStream<
         AssistantMetaStreamChunk,
         AssistantStreamChunk
       >({
-        transform(chunk, controller) {
+        async transform(chunk, controller) {
+          const executionId = executionIdsByPath.get(pathKey(chunk.path));
+
           // forward everything
           if (chunk.type !== "part-finish" || chunk.meta.type !== "tool-call") {
-            controller.enqueue(chunk);
+            controller.enqueue(
+              executionId ? withExecutionId(chunk, executionId) : chunk,
+            );
           }
 
           const type = chunk.type;
 
           switch (type) {
-            case "part-start":
+            case "part-start": {
+              const partIndex = nextPartIndex;
+              nextPartIndex += 1;
               if (chunk.part.type === "tool-call") {
                 const reader = new ToolCallReaderImpl<
                   ReadonlyJSONObject,
                   ReadonlyJSONValue
                 >();
-                toolCallControllers.set(chunk.part.toolCallId, reader);
+                const executionId = Symbol();
+                executionIdsByPath.set(String(partIndex), executionId);
+                toolCallControllers.set(executionId, reader);
 
-                options.streamCall({
+                internalOptions.streamCall({
                   reader,
                   toolCallId: chunk.part.toolCallId,
                   toolName: chunk.part.toolName,
+                  executionId,
                 });
               }
               break;
+            }
             case "text-delta": {
               if (chunk.meta.type === "tool-call") {
-                const toolCallId = chunk.meta.toolCallId;
+                const executionId = executionIdsByPath.get(pathKey(chunk.path));
 
-                const controller = toolCallControllers.get(toolCallId);
+                const controller = executionId
+                  ? toolCallControllers.get(executionId)
+                  : undefined;
                 if (!controller)
                   throw new Error("No controller found for tool call");
-                controller.appendArgsTextDelta(chunk.textDelta);
+                // Awaited so the writer lock is released (and argsText updated)
+                // before the next chunk acquires the writer.
+                await controller.appendArgsTextDelta(chunk.textDelta);
               }
               break;
             }
             case "result": {
               if (chunk.meta.type !== "tool-call") break;
 
-              const { toolCallId } = chunk.meta;
-              const controller = toolCallControllers.get(toolCallId);
+              const executionId = executionIdsByPath.get(pathKey(chunk.path));
+              const controller = executionId
+                ? toolCallControllers.get(executionId)
+                : undefined;
               if (!controller)
                 throw new Error("No controller found for tool call");
               controller.setResponse(
@@ -104,67 +190,109 @@ export class ToolExecutionStream extends PipeableTransformStream<
                   result: chunk.result,
                   artifact: chunk.artifact,
                   isError: chunk.isError,
+                  modelContent: chunk.modelContent,
                 }),
               );
+              toolCallIdsWithBackendResult.add(executionId!);
               break;
             }
             case "tool-call-args-text-finish": {
               if (chunk.meta.type !== "tool-call") break;
 
               const { toolCallId, toolName } = chunk.meta;
-              const streamController = toolCallControllers.get(toolCallId)!;
+              const executionId = executionIdsByPath.get(pathKey(chunk.path));
+              const streamController = executionId
+                ? toolCallControllers.get(executionId)
+                : undefined;
               if (!streamController)
                 throw new Error("No controller found for tool call");
+
+              // Args fully streamed: close the reader so awaited absent fields
+              // resolve. Awaited so the close settles before the writer is reused.
+              await streamController.finishArgsText();
+
+              // A backend result is authoritative. Closing the args stream still
+              // emits this finish chunk, but must not parse stale/incomplete args,
+              // execute the frontend tool, or enqueue a second result.
+              if (toolCallIdsWithBackendResult.has(executionId!)) break;
 
               let isExecuting = false;
               const promise = withPromiseOrValue(
                 () => {
-                  let args;
+                  let args: ReadonlyJSONObject;
                   try {
-                    args = sjson.parse(streamController.argsText);
+                    args = sjson.parse(
+                      streamController.argsText,
+                    ) as ReadonlyJSONObject;
                   } catch (e) {
                     throw new Error(
                       `Function parameter parsing failed. ${JSON.stringify((e as Error).message)}`,
                     );
                   }
 
-                  const executeResult = options.execute({
+                  const executeResult = internalOptions.execute({
                     toolCallId,
                     toolName,
                     args,
+                    executionId: executionId!,
                   });
 
                   // Only mark as executing if the tool has frontend execution
                   if (executeResult !== undefined) {
                     isExecuting = true;
-                    options.onExecutionStart?.(toolCallId, toolName);
+                    invokeExecutionCallback(
+                      "onExecutionStart",
+                      internalOptions.onExecutionStart,
+                      toolCallId,
+                      toolName,
+                      executionId!,
+                    );
                   }
 
                   return executeResult;
                 },
                 (c) => {
                   if (isExecuting) {
-                    options.onExecutionEnd?.(toolCallId, toolName);
+                    invokeExecutionCallback(
+                      "onExecutionEnd",
+                      internalOptions.onExecutionEnd,
+                      toolCallId,
+                      toolName,
+                      executionId!,
+                    );
                   }
 
                   if (c === undefined) return;
 
-                  // TODO how to handle new ToolResult({ result: undefined })?
                   const result = new ToolResponse({
                     artifact: c.artifact,
                     result: c.result,
                     isError: c.isError,
+                    messages: c.messages,
+                    modelContent: c.modelContent,
                   });
                   streamController.setResponse(result);
-                  controller.enqueue({
-                    type: "result",
-                    path: chunk.path,
-                    ...result,
-                  });
+                  enqueueIfOpen(
+                    controller,
+                    withExecutionId(
+                      {
+                        type: "result",
+                        path: chunk.path,
+                        ...result,
+                      },
+                      executionId!,
+                    ),
+                  );
                 },
                 (e) => {
                   if (isExecuting) {
-                    options.onExecutionEnd?.(toolCallId, toolName);
+                    invokeExecutionCallback(
+                      "onExecutionEnd",
+                      internalOptions.onExecutionEnd,
+                      toolCallId,
+                      toolName,
+                      executionId!,
+                    );
                   }
 
                   const result = new ToolResponse({
@@ -173,15 +301,21 @@ export class ToolExecutionStream extends PipeableTransformStream<
                   });
 
                   streamController.setResponse(result);
-                  controller.enqueue({
-                    type: "result",
-                    path: chunk.path,
-                    ...result,
-                  });
+                  enqueueIfOpen(
+                    controller,
+                    withExecutionId(
+                      {
+                        type: "result",
+                        path: chunk.path,
+                        ...result,
+                      },
+                      executionId!,
+                    ),
+                  );
                 },
               );
               if (promise) {
-                toolCallPromises.set(toolCallId, promise);
+                toolCallPromises.set(executionId!, promise);
               }
               break;
             }
@@ -189,16 +323,25 @@ export class ToolExecutionStream extends PipeableTransformStream<
             case "part-finish": {
               if (chunk.meta.type !== "tool-call") break;
 
-              const { toolCallId } = chunk.meta;
-              const toolCallPromise = toolCallPromises.get(toolCallId);
+              const executionId = executionIdsByPath.get(pathKey(chunk.path));
+              const toolCallPromise = executionId
+                ? toolCallPromises.get(executionId)
+                : undefined;
+              const cleanup = () => {
+                if (!executionId) return;
+                toolCallPromises.delete(executionId);
+                toolCallControllers.delete(executionId);
+                toolCallIdsWithBackendResult.delete(executionId);
+                executionIdsByPath.delete(pathKey(chunk.path));
+              };
               if (toolCallPromise) {
                 toolCallPromise.then(() => {
-                  toolCallPromises.delete(toolCallId);
-                  toolCallControllers.delete(toolCallId);
+                  cleanup();
 
-                  controller.enqueue(chunk);
+                  enqueueIfOpen(controller, chunk);
                 });
               } else {
+                cleanup();
                 controller.enqueue(chunk);
               }
             }

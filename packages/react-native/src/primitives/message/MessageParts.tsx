@@ -19,34 +19,18 @@ export namespace MessagePrimitiveParts {
 /**
  * Renders the parts of a message with React Native-specific default components.
  */
-export const MessagePrimitiveParts: FC<MessagePrimitiveParts.Props> = ({
-  components,
-  ...rest
-}) => {
+export const MessagePrimitiveParts: FC<MessagePrimitiveParts.Props> = (
+  props,
+) => {
+  if ("children" in props) {
+    return (
+      <MessagePrimitivePartsBase>{props.children}</MessagePrimitivePartsBase>
+    );
+  }
+
+  const { components, ...rest } = props;
   const merged = components
-    ? {
-        Text: components.Text ?? rnDefaultComponents.Text,
-        Image: components.Image ?? messagePartsDefaultComponents.Image,
-        Reasoning:
-          components.Reasoning ?? messagePartsDefaultComponents.Reasoning,
-        Source: components.Source ?? messagePartsDefaultComponents.Source,
-        File: components.File ?? messagePartsDefaultComponents.File,
-        Unstable_Audio:
-          components.Unstable_Audio ??
-          messagePartsDefaultComponents.Unstable_Audio,
-        ...("ChainOfThought" in components
-          ? { ChainOfThought: components.ChainOfThought }
-          : {
-              tools: components.tools,
-              data: components.data,
-              ToolGroup:
-                components.ToolGroup ?? messagePartsDefaultComponents.ToolGroup,
-              ReasoningGroup:
-                components.ReasoningGroup ??
-                messagePartsDefaultComponents.ReasoningGroup,
-            }),
-        Empty: components.Empty,
-      }
+    ? { ...components, Text: components.Text ?? rnDefaultComponents.Text }
     : rnDefaultComponents;
 
   return <MessagePrimitivePartsBase components={merged as any} {...rest} />;

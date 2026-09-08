@@ -1,6 +1,7 @@
 export {
   parsePartialJsonObject,
   getPartialJsonObjectFieldState,
+  getPartialJsonObjectMeta,
 } from "./utils/json/parse-partial-json-object";
 export {
   type AsyncIterableStream,
@@ -14,3 +15,7 @@ export type {
 
 export { AssistantTransformStream } from "./core/utils/stream/AssistantTransformStream";
 export { AssistantMetaTransformStream } from "./core/utils/stream/AssistantMetaTransformStream";
+export {
+  SSEEventDecoder,
+  type SSEEvent,
+} from "./core/utils/stream/SSEEventDecoder";

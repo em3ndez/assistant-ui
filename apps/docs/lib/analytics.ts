@@ -1,15 +1,11 @@
+import type { LearnCourseStartSource } from "@/lib/xulux/learn/types";
+
 declare global {
   interface Window {
     posthog?: {
       capture?: (
         event: string,
         properties?: Record<string, string | number | boolean>,
-      ) => void;
-    };
-    umami?: {
-      track: (
-        event: string,
-        data?: Record<string, string | number | boolean>,
       ) => void;
     };
   }
@@ -33,10 +29,9 @@ const getVercelTrack = () => {
   return vercelTrackPromise;
 };
 
-const trackEvent = (
-  event: string,
-  properties?: Record<string, string | number | boolean>,
-) => {
+export type AnalyticsProperties = Record<string, string | number | boolean>;
+
+const trackEvent = (event: string, properties?: AnalyticsProperties) => {
   if (typeof window === "undefined") return;
 
   // PostHog
@@ -44,28 +39,22 @@ const trackEvent = (
 
   // Vercel Analytics
   void getVercelTrack().then((track) => track?.(event, properties));
-
-  // Umami
-  window.umami?.track?.(event, properties);
 };
 
 export const analytics = {
   cta: {
-    clicked: (cta: "get_started" | "contact_sales", location: string) =>
-      trackEvent("cta_clicked", { cta, location }),
+    clicked: (
+      cta: "get_started" | "contact_sales" | "why_us",
+      location: string,
+    ) => trackEvent("cta_clicked", { cta, location }),
 
     npmCommandCopied: (
       command = "npx assistant-ui init",
-      properties?: Record<string, string | number | boolean>,
+      properties?: AnalyticsProperties,
     ) => trackEvent("npm_command_copied", { ...properties, command }),
-  },
 
-  outbound: {
-    linkClicked: (
-      href: string,
-      label: string,
-      properties?: Record<string, string | number | boolean>,
-    ) => trackEvent("outbound_link_clicked", { ...properties, href, label }),
+    promptCopied: (properties?: AnalyticsProperties) =>
+      trackEvent("prompt_copied", properties),
   },
 
   search: {
@@ -92,27 +81,6 @@ export const analytics = {
       trackEvent("code_block_copied", { language, source }),
   },
 
-  example: {
-    tabSwitched: (example: string) =>
-      trackEvent("example_tab_switched", { example }),
-  },
-
-  docs: {
-    navigationClicked: (pageName: string, pageUrl: string, depth: number) =>
-      trackEvent("doc_navigation_clicked", {
-        page_name: pageName,
-        page_url: pageUrl,
-        depth,
-      }),
-
-    folderToggled: (folderName: string, isOpen: boolean, depth: number) =>
-      trackEvent("doc_folder_toggled", {
-        folder_name: folderName,
-        is_open: isOpen,
-        depth,
-      }),
-  },
-
   builder: {
     presetSelected: (preset: string) =>
       trackEvent("builder_preset_selected", { preset }),
@@ -129,12 +97,6 @@ export const analytics = {
   },
 
   toc: {
-    linkClicked: (headingTitle: string, headingDepth: number) =>
-      trackEvent("toc_link_clicked", {
-        heading_title: headingTitle,
-        heading_depth: headingDepth,
-      }),
-
     actionClicked: (action: "copy" | "markdown" | "github" | "ask_ai") =>
       trackEvent("toc_action_clicked", { action }),
   },
@@ -144,36 +106,11 @@ export const analytics = {
       trackEvent("package_manager_selected", { package_manager: pm }),
   },
 
-  mcpAppStudio: {
-    sectionViewed: (section: string) =>
-      trackEvent("mcp_app_studio_section_viewed", { section }),
-
-    workbenchFullscreenToggled: (open: boolean) =>
-      trackEvent("mcp_app_studio_workbench_fullscreen_toggled", { open }),
-
-    workbenchIframeLoaded: (
-      variant: "inline" | "fullscreen",
-      elapsedMs?: number,
-    ) =>
-      trackEvent("mcp_app_studio_workbench_iframe_loaded", {
-        variant,
-        ...(elapsedMs === undefined ? {} : { elapsed_ms: elapsedMs }),
-      }),
-
-    workbenchIframeFailed: (
-      variant: "inline" | "fullscreen",
-      elapsedMs?: number,
-    ) =>
-      trackEvent("mcp_app_studio_workbench_iframe_failed", {
-        variant,
-        ...(elapsedMs === undefined ? {} : { elapsed_ms: elapsedMs }),
-      }),
-  },
-
   assistant: {
     feedbackShown: (props: {
       threadId: string;
       messageId: string;
+      surface?: "docs_assistant" | "home_thread";
       user_question_length: number;
       assistant_response_length: number;
       tool_calls_count: number;
@@ -185,6 +122,7 @@ export const analytics = {
     feedbackClicked: (props: {
       threadId: string;
       messageId: string;
+      surface?: "docs_assistant" | "home_thread";
       type: "positive" | "negative";
       category?:
         | "wrong_information"
@@ -204,6 +142,7 @@ export const analytics = {
     feedbackSubmitFailed: (props: {
       threadId: string;
       messageId: string;
+      surface?: "docs_assistant" | "home_thread";
       type: "positive" | "negative";
       category?:
         | "wrong_information"
@@ -222,7 +161,10 @@ export const analytics = {
       trackEvent("assistant_feedback_submit_failed", props);
     },
 
-    panelToggled: (props: { open: boolean; source: "trigger" | "toggle" }) => {
+    panelToggled: (props: {
+      open: boolean;
+      source: "trigger" | "toggle" | "header" | "shortcut";
+    }) => {
       trackEvent("assistant_panel_toggled", props);
     },
 
@@ -282,6 +224,7 @@ export const analytics = {
     feedbackSubmitted: (props: {
       threadId: string;
       messageId: string;
+      surface?: "docs_assistant" | "home_thread";
       type: "positive" | "negative";
       category?:
         | "wrong_information"
@@ -297,5 +240,115 @@ export const analytics = {
     }) => {
       trackEvent("assistant_feedback_submitted", props);
     },
+  },
+
+  xulux: {
+    learnPageViewed: (props: {
+      session_id: string;
+      thread_id?: string;
+      pathname?: string;
+      course_id: string;
+      status: "not_started" | "in_progress" | "completed";
+    }) => trackEvent("learn_page_viewed", props),
+
+    learnCourseStarted: (props: {
+      session_id: string;
+      thread_id?: string;
+      pathname?: string;
+      course_id: string;
+      source: LearnCourseStartSource;
+    }) => trackEvent("learn_course_started", props),
+
+    learnStepAdvanced: (props: {
+      session_id: string;
+      thread_id?: string;
+      pathname?: string;
+      course_id: string;
+      step_id: string;
+      step_index: number;
+    }) => trackEvent("learn_step_advanced", props),
+
+    learnCourseCompleted: (props: {
+      session_id: string;
+      thread_id?: string;
+      pathname?: string;
+      course_id: string;
+    }) => trackEvent("learn_course_completed", props),
+
+    learnCourseDownloaded: (props: {
+      session_id: string;
+      thread_id?: string;
+      pathname?: string;
+      course_id: string;
+      stage_id: string;
+    }) => trackEvent("learn_course_downloaded", props),
+
+    learnCertificateSubmitted: (props: {
+      session_id: string;
+      thread_id?: string;
+      pathname?: string;
+      course_id: string;
+    }) => trackEvent("learn_certificate_submitted", props),
+
+    playgroundViewed: (props: {
+      session_id: string;
+      thread_id?: string;
+      pathname?: string;
+    }) => trackEvent("xulux_playground_viewed", props),
+
+    promptSubmitted: (props: {
+      session_id: string;
+      thread_id?: string;
+      pathname?: string;
+      source: "typed_prompt" | "suggestion" | "composer" | "retry";
+      message_length: number;
+      suggestion_group?: string;
+      suggestion_label?: string;
+    }) => trackEvent("xulux_prompt_submitted", props),
+
+    suggestionSelected: (props: {
+      session_id: string;
+      thread_id?: string;
+      pathname?: string;
+      group: "New app" | "Templates" | "Learn" | "Cloud";
+      label: string;
+      message_length: number;
+    }) => trackEvent("xulux_suggestion_selected", props),
+
+    templatesOpened: (props: {
+      session_id: string;
+      thread_id?: string;
+      pathname?: string;
+      surface: "landing_carousel" | "header";
+    }) => trackEvent("xulux_templates_opened", props),
+
+    templateSelected: (props: {
+      session_id: string;
+      thread_id?: string;
+      pathname?: string;
+      template_id: string;
+      template_kind: "template" | "example";
+      surface: "landing_carousel" | "templates_modal" | "detail_modal";
+      action: "open_detail" | "start" | "other_template";
+      other_template_id?: string;
+    }) => trackEvent("xulux_template_selected", props),
+
+    previewShown: (props: {
+      session_id: string;
+      thread_id?: string;
+      pathname?: string;
+      source: "template" | "agent_template";
+      template_id?: string;
+    }) => trackEvent("xulux_preview_shown", props),
+
+    converted: (props: {
+      session_id: string;
+      thread_id?: string;
+      pathname?: string;
+      action: "copy_prompt" | "download";
+      surface: "open_in_card" | "canvas" | "detail_modal";
+      download_type?: "template" | "demo";
+      template_id?: string;
+    }) => trackEvent("xulux_converted", props),
   },
 };

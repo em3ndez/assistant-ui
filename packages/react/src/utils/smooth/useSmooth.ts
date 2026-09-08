@@ -1,27 +1,70 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useAuiState } from "@assistant-ui/store";
+import { useAui, useAuiState } from "@assistant-ui/store";
 import type {
   MessagePartStatus,
   ReasoningMessagePart,
   TextMessagePart,
   MessagePartState,
 } from "@assistant-ui/core";
-import { useCallbackRef } from "@radix-ui/react-use-callback-ref";
+import { useCallbackRef } from "radix-ui/internal";
+import { useMediaQuery } from "../hooks/useMediaQuery";
 import { useSmoothStatusStore } from "./SmoothContext";
 import { writableStore } from "../../context/ReadonlyStore";
+
+/**
+ * Tuning options for the smooth text streaming animation.
+ */
+export type SmoothOptions = {
+  /**
+   * Target time in milliseconds to drain the backlog of unrevealed
+   * characters. Larger values reveal long backlogs more gradually.
+   * @default 250
+   */
+  drainMs?: number | undefined;
+  /**
+   * Maximum time in milliseconds between revealed characters, i.e. the
+   * slowest reveal rate when the backlog is short.
+   * @default 5
+   */
+  maxCharIntervalMs?: number | undefined;
+  /**
+   * Maximum number of characters revealed per animation frame.
+   * @default Infinity
+   */
+  maxCharsPerFrame?: number | undefined;
+  /**
+   * Minimum time in milliseconds between committed updates. The reveal keeps
+   * advancing every frame, but the visible text (and the downstream re-render
+   * and markdown re-parse it triggers) is committed at most once per interval.
+   * The final frame always commits. `0` commits every frame.
+   * @default 0
+   */
+  minCommitMs?: number | undefined;
+};
+
+const DEFAULT_DRAIN_MS = 250;
+const DEFAULT_MAX_CHAR_INTERVAL_MS = 5;
 
 class TextStreamAnimator {
   private animationFrameId: number | null = null;
   private lastUpdateTime: number = Date.now();
+  public lastCommitTime: number = 0;
 
   public targetText: string = "";
+  public drainMs: number = DEFAULT_DRAIN_MS;
+  public maxCharIntervalMs: number = DEFAULT_MAX_CHAR_INTERVAL_MS;
+  public maxCharsPerFrame: number = Infinity;
+  public minCommitMs: number = 0;
 
-  constructor(
-    public currentText: string,
-    private setText: (newText: string) => void,
-  ) {}
+  public currentText: string;
+  private setText: (newText: string) => void;
+
+  constructor(currentText: string, setText: (newText: string) => void) {
+    this.currentText = currentText;
+    this.setText = setText;
+  }
 
   start() {
     if (this.animationFrameId !== null) return;
@@ -42,12 +85,21 @@ class TextStreamAnimator {
     let timeToConsume = deltaTime;
 
     const remainingChars = this.targetText.length - this.currentText.length;
-    const baseTimePerChar = Math.min(5, 250 / remainingChars);
+    const baseTimePerChar = Math.min(
+      this.maxCharIntervalMs,
+      this.drainMs / remainingChars,
+    );
 
+    const frameLimit = Math.min(remainingChars, this.maxCharsPerFrame);
     let charsToAdd = 0;
-    while (timeToConsume >= baseTimePerChar && charsToAdd < remainingChars) {
+    while (timeToConsume >= baseTimePerChar && charsToAdd < frameLimit) {
       charsToAdd++;
       timeToConsume -= baseTimePerChar;
+    }
+    // A cap-limited frame must not bank its surplus time, or the next
+    // frame would burst past the cap.
+    if (charsToAdd === frameLimit && frameLimit === this.maxCharsPerFrame) {
+      timeToConsume = 0;
     }
 
     if (charsToAdd !== remainingChars) {
@@ -62,7 +114,12 @@ class TextStreamAnimator {
       this.currentText.length + charsToAdd,
     );
     this.lastUpdateTime = currentTime - timeToConsume;
-    this.setText(this.currentText);
+
+    const isComplete = charsToAdd === remainingChars;
+    if (isComplete || currentTime - this.lastCommitTime >= this.minCommitMs) {
+      this.lastCommitTime = currentTime;
+      this.setText(this.currentText);
+    }
   };
 }
 
@@ -70,17 +127,69 @@ const SMOOTH_STATUS: MessagePartStatus = Object.freeze({
   type: "running",
 });
 
+const positiveOr = (value: number | undefined, fallback: number): number =>
+  value !== undefined && value > 0 ? value : fallback;
+
+/**
+ * Animates streamed message part text with a typewriter-style reveal.
+ *
+ * Takes the current part state and a `smooth` argument: `false` disables,
+ * `true` uses the default rate, and a {@link SmoothOptions} object tunes
+ * the reveal. Returns the part state with `text` replaced by the revealed
+ * prefix and `status` reporting `running` until the reveal catches up.
+ * If the source settles before any character has been revealed, the text
+ * is committed immediately so a missed animation frame cannot leave an
+ * empty bubble.
+ *
+ * The reveal auto-disables under `prefers-reduced-motion: reduce`,
+ * committing the full text immediately; this takes precedence over an
+ * explicit `smooth={true}`.
+ *
+ * @example
+ * ```tsx
+ * const { text, status } = useSmooth(useMessagePartText(), {
+ *   drainMs: 500,
+ *   maxCharsPerFrame: 30,
+ * });
+ * ```
+ */
 export const useSmooth = (
   state: MessagePartState & (TextMessagePart | ReasoningMessagePart),
-  smooth: boolean = false,
+  smooth: boolean | SmoothOptions = false,
 ): MessagePartState & (TextMessagePart | ReasoningMessagePart) => {
   const { text } = state;
-  const id = useAuiState((s) => s.message.id);
+  const reduceMotion = useMediaQuery("(prefers-reduced-motion: reduce)");
+  const options =
+    typeof smooth === "object" && smooth !== null ? smooth : undefined;
+  const enabled = smooth !== false && smooth !== null && !reduceMotion;
+  const drainMs = positiveOr(options?.drainMs, DEFAULT_DRAIN_MS);
+  const maxCharIntervalMs = positiveOr(
+    options?.maxCharIntervalMs,
+    DEFAULT_MAX_CHAR_INTERVAL_MS,
+  );
+  const maxCharsPerFrame = positiveOr(options?.maxCharsPerFrame, Infinity);
+  const minCommitMs = positiveOr(options?.minCommitMs, 0);
 
-  const idRef = useRef(id);
   const [displayedText, setDisplayedText] = useState(
     state.status.type === "running" ? "" : text,
   );
+
+  // Render-phase resync on part flip or text discontinuity, so the
+  // first paint after a thread switch never shows the previous
+  // part's text (#4051). `displayedText` is already a prefix of
+  // `text` during normal streaming, so use it as the previous-text
+  // reference instead of carrying separate state — avoids the
+  // double render per streaming token. Read part identity through
+  // `useAuiState` so we actually subscribe to its changes instead
+  // of relying on a render-time proxy reference that may be stable
+  // across thread swaps.
+  const aui = useAui();
+  const part = useAuiState(() => aui.part);
+  const [prevPart, setPrevPart] = useState(part);
+  if (part !== prevPart || !text.startsWith(displayedText)) {
+    setPrevPart(part);
+    setDisplayedText(state.status.type === "running" ? "" : text);
+  }
 
   const smoothStatusStore = useSmoothStatusStore({ optional: true });
   const setText = useCallbackRef((text: string) => {
@@ -98,46 +207,66 @@ export const useSmooth = (
   useEffect(() => {
     if (smoothStatusStore) {
       const target =
-        smooth && (displayedText !== text || state.status.type === "running")
+        enabled && (displayedText !== text || state.status.type === "running")
           ? SMOOTH_STATUS
           : state.status;
       writableStore(smoothStatusStore).setState(target, true);
     }
-  }, [smoothStatusStore, smooth, text, displayedText, state.status]);
+  }, [smoothStatusStore, enabled, text, displayedText, state.status]);
 
   const [animatorRef] = useState<TextStreamAnimator>(
     new TextStreamAnimator(displayedText, setText),
   );
 
   useEffect(() => {
-    if (!smooth) {
+    animatorRef.drainMs = drainMs;
+    animatorRef.maxCharIntervalMs = maxCharIntervalMs;
+    animatorRef.maxCharsPerFrame = maxCharsPerFrame;
+    animatorRef.minCommitMs = minCommitMs;
+  }, [animatorRef, drainMs, maxCharIntervalMs, maxCharsPerFrame, minCommitMs]);
+
+  const animatorPartRef = useRef(part);
+  useEffect(() => {
+    if (!enabled) {
       animatorRef.stop();
       return;
     }
 
-    if (idRef.current !== id || !text.startsWith(animatorRef.targetText)) {
-      idRef.current = id;
-
+    const partChanged = animatorPartRef.current !== part;
+    animatorPartRef.current = part;
+    // A new part whose text shares a prefix with the previous target would
+    // keep the stale cursor and flicker without this reset.
+    if (partChanged || !text.startsWith(animatorRef.targetText)) {
       if (state.status.type === "running") {
-        // New streaming message → animate from empty string
-        setText("");
         animatorRef.currentText = "";
         animatorRef.targetText = text;
+        animatorRef.lastCommitTime = 0;
         animatorRef.start();
       } else {
-        // Completed message → display immediately
-        setText(text);
         animatorRef.currentText = text;
         animatorRef.targetText = text;
         animatorRef.stop();
+        setText(text);
       }
-
       return;
     }
 
     animatorRef.targetText = text;
+    if (state.status.type !== "running") {
+      // No character has painted. A pending frame that never runs would
+      // leave an empty bubble after settle.
+      if (animatorRef.currentText === "") {
+        animatorRef.currentText = text;
+        animatorRef.stop();
+        setText(text);
+        return;
+      }
+      animatorRef.start();
+      return;
+    }
+
     animatorRef.start();
-  }, [setText, animatorRef, id, smooth, text, state.status.type]);
+  }, [animatorRef, enabled, text, state.status.type, part, setText]);
 
   useEffect(() => {
     return () => {
@@ -147,13 +276,13 @@ export const useSmooth = (
 
   return useMemo(
     () =>
-      smooth
+      enabled
         ? {
-            type: "text",
+            ...state,
             text: displayedText,
             status: text === displayedText ? state.status : SMOOTH_STATUS,
           }
         : state,
-    [smooth, displayedText, state, text],
+    [enabled, displayedText, state, text],
   );
 };

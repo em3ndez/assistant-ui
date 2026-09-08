@@ -5,8 +5,9 @@ import { ChevronRight, Layers } from "lucide-react";
 import {
   Tooltip,
   TooltipContent,
+  TooltipProvider,
   TooltipTrigger,
-} from "@/components/ui/tooltip";
+} from "@/components/ui/radix/tooltip";
 import { Fragment } from "react";
 
 interface ComponentProps {
@@ -41,33 +42,35 @@ export const Component: React.FC<ComponentProps> = ({
           {name}
         </a>
       ) : (
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <a href={docsLink}>
-              <code>
-                &lt;
-                {name
-                  ? name
-                      .split(".")
-                      .map((part, index) =>
-                        index === name.split(".").length - 1 ? (
-                          <strong key={index}>{part}</strong>
-                        ) : (
-                          <span key={index}>{part}.</span>
-                        ),
-                      )
-                  : name}
-                {`${props ? ` ${props}` : ""} />`}
-              </code>
-            </a>
-          </TooltipTrigger>
-          <TooltipContent>{tooltip}</TooltipContent>
-        </Tooltip>
+        <TooltipProvider>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <a href={docsLink}>
+                <code>
+                  &lt;
+                  {name
+                    ? name
+                        .split(".")
+                        .map((part, index) =>
+                          index === name.split(".").length - 1 ? (
+                            <strong key={index}>{part}</strong>
+                          ) : (
+                            <span key={index}>{part}.</span>
+                          ),
+                        )
+                    : name}
+                  {`${props ? ` ${props}` : ""} />`}
+                </code>
+              </a>
+            </TooltipTrigger>
+            <TooltipContent>{tooltip}</TooltipContent>
+          </Tooltip>
+        </TooltipProvider>
       )}
       {isContextProvider && (
         <div className="ml-3 flex items-center">
           <Layers className="mr-2 h-5 w-5 text-purple-500 dark:text-purple-400" />
-          <span className="font-semibold text-purple-500 text-sm dark:text-purple-400">
+          <span className="text-sm font-semibold text-purple-500 dark:text-purple-400">
             Context Provider
           </span>
         </div>
@@ -96,29 +99,6 @@ export const Component: React.FC<ComponentProps> = ({
       </div>
     )}
     {children && <div className="mt-4 ml-7">{children}</div>}
-  </div>
-);
-
-interface RuntimeHooksProps {
-  hooks: { name: string; docsLink: string }[];
-}
-
-export const RuntimeHooks: React.FC<RuntimeHooksProps> = ({ hooks }) => (
-  <div className="mt-8 mb-6">
-    <ul className="list-inside list-disc space-y-3">
-      {hooks.map((hook, index) => (
-        <li key={index} className="text-base">
-          <a
-            href={hook.docsLink}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="hover:underline"
-          >
-            {hook.name}
-          </a>
-        </li>
-      ))}
-    </ul>
   </div>
 );
 

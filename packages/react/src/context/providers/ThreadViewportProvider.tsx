@@ -1,14 +1,14 @@
 "use client";
 
-import type { FC, PropsWithChildren } from "react";
-import { useEffect, useState } from "react";
+import { type FC, type PropsWithChildren, useEffect, useState } from "react";
+
 import {
   makeThreadViewportStore,
   type ThreadViewportStoreOptions,
 } from "../stores/ThreadViewport";
 import {
   ThreadViewportContext,
-  ThreadViewportContextValue,
+  type ThreadViewportContextValue,
   useThreadViewportStore,
 } from "../react/ThreadViewportContext";
 import { writableStore } from "../ReadonlyStore";
@@ -19,12 +19,14 @@ export type ThreadViewportProviderProps = PropsWithChildren<{
 
 const useThreadViewportStoreValue = (options: ThreadViewportStoreOptions) => {
   const outerViewport = useThreadViewportStore({ optional: true });
+  // Viewport options are initial configuration. Keeping them non-reactive avoids
+  // fanout through every message in long threads when anchoring config changes.
   const [store] = useState(() => makeThreadViewportStore(options));
 
   // Forward scrollToBottom from outer viewport to inner viewport
   useEffect(() => {
-    return outerViewport?.getState().onScrollToBottom(() => {
-      store.getState().scrollToBottom();
+    return outerViewport?.getState().onScrollToBottom((config) => {
+      store.getState().scrollToBottom(config);
     });
   }, [outerViewport, store]);
 
@@ -36,18 +38,6 @@ const useThreadViewportStoreValue = (options: ThreadViewportStoreOptions) => {
       }
     });
   }, [store, outerViewport]);
-
-  // Sync options to store when they change
-  useEffect(() => {
-    const nextState = {
-      turnAnchor: options.turnAnchor ?? "bottom",
-    };
-
-    const currentState = store.getState();
-    if (currentState.turnAnchor !== nextState.turnAnchor) {
-      writableStore(store).setState(nextState);
-    }
-  }, [store, options.turnAnchor]);
 
   return store;
 };

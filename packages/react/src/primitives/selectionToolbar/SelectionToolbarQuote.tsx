@@ -1,7 +1,7 @@
 "use client";
 
-import { Primitive } from "@radix-ui/react-primitive";
-import { composeEventHandlers } from "@radix-ui/primitive";
+import { Primitive } from "../../utils/Primitive";
+import { composeEventHandlers } from "radix-ui/internal";
 import {
   type ComponentPropsWithoutRef,
   type ComponentRef,
@@ -40,7 +40,7 @@ export const SelectionToolbarPrimitiveQuote = forwardRef<
   const handleClick = useCallback(() => {
     if (!info) return;
 
-    aui.thread().composer().setQuote({
+    aui.thread.composer().setQuote({
       text: info.text,
       messageId: info.messageId,
     });

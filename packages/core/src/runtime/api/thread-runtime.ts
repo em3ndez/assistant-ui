@@ -1,49 +1,49 @@
-import {
+import type {
   ThreadSuggestion,
   RuntimeCapabilities,
   ThreadRuntimeCore,
   SpeechState,
+  VoiceSessionState,
+  ThreadRuntimeEventCallback,
   ThreadRuntimeEventType,
   StartRunConfig,
   ResumeRunConfig,
 } from "../interfaces/thread-runtime-core";
-import { ExportedMessageRepository } from "../utils/message-repository";
-import { ThreadMessageLike } from "../utils/thread-message-like";
+import type { ExportedMessageRepository } from "../utils/message-repository";
+import type { ThreadMessageLike } from "../utils/thread-message-like";
 import {
-  MessageRuntime,
+  type MessageRuntime,
   MessageRuntimeImpl,
-  MessageState,
+  type MessageState,
 } from "./message-runtime";
+import { NestedSubscriptionSubject } from "../../subscribable/subscribable";
 import {
-  NestedSubscriptionSubject,
   ShallowMemoizeSubject,
   SKIP_UPDATE,
-} from "../../subscribable";
+} from "../../subscribable/subscribable";
 import type { SubscribableWithState } from "../../subscribable/subscribable";
 import {
-  ThreadComposerRuntime,
+  type ThreadComposerRuntime,
   ThreadComposerRuntimeImpl,
 } from "./composer-runtime";
-import {
+import type {
   MessageRuntimePath,
   ThreadListItemRuntimePath,
   ThreadRuntimePath,
 } from "./paths";
 import type { ThreadListItemState } from "./bindings";
-import type {
-  RunConfig,
-  AppendMessage,
-  ThreadMessage,
-  Unsubscribe,
-} from "../../types";
-import { EventSubscriptionSubject } from "../../subscribable";
+import type { AppendMessage, ThreadMessage } from "../../types/message";
+import type { Unsubscribe } from "../../types/unsubscribe";
+import { isMessageNotSentError } from "../../types/error";
+import type { RunConfig } from "../../types/message";
+import { EventSubscriptionSubject } from "../../subscribable/subscribable";
 import { symbolInnerMessage } from "../utils/external-store-message";
-import { ModelContext } from "../../model-context";
-import {
+import type { ModelContext } from "../../model-context/types";
+import type {
   ChatModelRunOptions,
   ChatModelRunResult,
 } from "../utils/chat-model-adapter";
-import { ReadonlyJSONValue } from "assistant-stream/utils";
+import type { ReadonlyJSONValue } from "assistant-stream/utils";
 
 export type CreateStartRunConfig = {
   parentId: string | null;
@@ -77,6 +77,10 @@ const toStartRunConfig = (message: CreateStartRunConfig): StartRunConfig => {
 export type CreateAppendMessage =
   | string
   | {
+      /**
+       * An omitted value or `undefined` selects the current tail.
+       * `null` selects a root branch.
+       */
       parentId?: string | null | undefined;
       sourceId?: string | null | undefined;
       role?: AppendMessage["role"] | undefined;
@@ -107,7 +111,10 @@ const toAppendMessage = (
 
   return {
     createdAt: message.createdAt ?? new Date(),
-    parentId: message.parentId ?? messages.at(-1)?.id ?? null,
+    parentId:
+      message.parentId === undefined
+        ? (messages.at(-1)?.id ?? null)
+        : message.parentId,
     sourceId: message.sourceId ?? null,
     role: message.role ?? "user",
     content: message.content,
@@ -190,28 +197,41 @@ export type ThreadState = {
    * @deprecated This API is still under active development and might change without notice.
    */
   readonly speech: SpeechState | undefined;
+
+  readonly voice: VoiceSessionState | undefined;
+};
+
+/**
+ * The canonical `isRunning` derivation. A runtime that tracks run state itself
+ * reports it directly; the rest fall back to the trailing assistant message.
+ */
+export const getThreadRuntimeCoreIsRunning = (
+  runtime: Pick<ThreadRuntimeCore, "isRunning" | "messages">,
+): boolean => {
+  if (runtime.isRunning !== undefined) return runtime.isRunning;
+  const lastMessage = runtime.messages.at(-1);
+  return (
+    lastMessage?.role === "assistant" && lastMessage.status.type === "running"
+  );
 };
 
 export const getThreadState = (
   runtime: ThreadRuntimeCore,
   threadListItemState: ThreadListItemState,
 ): ThreadState => {
-  const lastMessage = runtime.messages.at(-1);
   return Object.freeze({
     threadId: threadListItemState.id,
     metadata: threadListItemState,
     capabilities: runtime.capabilities,
     isDisabled: runtime.isDisabled,
     isLoading: runtime.isLoading,
-    isRunning:
-      lastMessage?.role !== "assistant"
-        ? false
-        : lastMessage.status.type === "running",
+    isRunning: getThreadRuntimeCoreIsRunning(runtime),
     messages: runtime.messages,
     state: runtime.state,
     suggestions: runtime.suggestions,
     extras: runtime.extras,
     speech: runtime.speech,
+    voice: runtime.voice,
   });
 };
 
@@ -249,10 +269,8 @@ export type ThreadRuntime = {
    */
   append(message: CreateAppendMessage): void;
 
-  /**
-   * @deprecated pass an object with `parentId` instead. This will be removed in 0.12.0.
-   */
-  startRun(parentId: string | null): void;
+  deleteMessage(messageId: string): void | Promise<void>;
+
   /**
    * Start a new run with the given configuration.
    * @param config The configuration for starting the run
@@ -263,7 +281,7 @@ export type ThreadRuntime = {
    * Resume a run with the given configuration.
    * @param config The configuration for resuming the run
    **/
-  unstable_resumeRun(config: CreateResumeRunConfig): void;
+  resumeRun(config: CreateResumeRunConfig): void;
 
   /**
    * Export the thread state in the external store format.
@@ -281,21 +299,16 @@ export type ThreadRuntime = {
    */
   importExternalState(state: any): void;
 
-  /**
-   * Load external state into the thread.
-   * @deprecated Use importExternalState instead. This method will be removed in 0.12.0.
-   * @param state The state to load into the thread
-   */
-  unstable_loadExternalState(state: any): void;
-
   subscribe(callback: () => void): Unsubscribe;
   cancelRun(): void;
-  getModelContext(): ModelContext;
-
   /**
-   * @deprecated This method was renamed to `getModelContext`.
+   * Notifies the runtime that the adapter discarded its backing session.
+   * Clears session-scoped tool-invocation state without run-cancel side
+   * effects such as composer draft restoration. Internal API for
+   * external-store adapter authors.
    */
-  getModelConfig(): ModelContext;
+  unstable_notifySessionReset(): void;
+  getModelContext(): ModelContext;
 
   export(): ExportedMessageRepository;
   import(repository: ExportedMessageRepository): void;
@@ -315,7 +328,17 @@ export type ThreadRuntime = {
    */
   stopSpeaking(): void;
 
-  unstable_on(event: ThreadRuntimeEventType, callback: () => void): Unsubscribe;
+  connectVoice(): void;
+  disconnectVoice(): void;
+  getVoiceVolume(): number;
+  subscribeVoiceVolume(callback: () => void): Unsubscribe;
+  muteVoice(): void;
+  unmuteVoice(): void;
+
+  unstable_on<E extends ThreadRuntimeEventType>(
+    event: E,
+    callback: ThreadRuntimeEventCallback<E>,
+  ): Unsubscribe;
 };
 
 export class ThreadRuntimeImpl implements ThreadRuntime {
@@ -330,6 +353,10 @@ export class ThreadRuntimeImpl implements ThreadRuntime {
   private readonly _threadBinding: ThreadRuntimeCoreBinding & {
     getStateState(): ThreadState;
   };
+  private readonly _stateBinding: ShallowMemoizeSubject<
+    ThreadState,
+    ThreadRuntimePath
+  >;
 
   constructor(
     threadBinding: ThreadRuntimeCoreBinding,
@@ -352,6 +379,7 @@ export class ThreadRuntimeImpl implements ThreadRuntime {
       },
     });
 
+    this._stateBinding = stateBinding;
     this._threadBinding = {
       path: threadBinding.path,
       getState: () => threadBinding.getState(),
@@ -377,14 +405,21 @@ export class ThreadRuntimeImpl implements ThreadRuntime {
 
   protected __internal_bindMethods() {
     this.append = this.append.bind(this);
-    this.unstable_resumeRun = this.unstable_resumeRun.bind(this);
-    this.unstable_loadExternalState =
-      this.unstable_loadExternalState.bind(this);
+    this.deleteMessage = this.deleteMessage.bind(this);
+    this.resumeRun = this.resumeRun.bind(this);
     this.importExternalState = this.importExternalState.bind(this);
     this.exportExternalState = this.exportExternalState.bind(this);
     this.startRun = this.startRun.bind(this);
     this.cancelRun = this.cancelRun.bind(this);
+    this.unstable_notifySessionReset =
+      this.unstable_notifySessionReset.bind(this);
     this.stopSpeaking = this.stopSpeaking.bind(this);
+    this.connectVoice = this.connectVoice.bind(this);
+    this.disconnectVoice = this.disconnectVoice.bind(this);
+    this.muteVoice = this.muteVoice.bind(this);
+    this.unmuteVoice = this.unmuteVoice.bind(this);
+    this.getVoiceVolume = this.getVoiceVolume.bind(this);
+    this.subscribeVoiceVolume = this.subscribeVoiceVolume.bind(this);
     this.export = this.export.bind(this);
     this.import = this.import.bind(this);
     this.reset = this.reset.bind(this);
@@ -393,7 +428,6 @@ export class ThreadRuntimeImpl implements ThreadRuntime {
     this.subscribe = this.subscribe.bind(this);
     this.unstable_on = this.unstable_on.bind(this);
     this.getModelContext = this.getModelContext.bind(this);
-    this.getModelConfig = this.getModelConfig.bind(this);
     this.getState = this.getState.bind(this);
   }
 
@@ -404,34 +438,36 @@ export class ThreadRuntimeImpl implements ThreadRuntime {
   }
 
   public append(message: CreateAppendMessage) {
-    this._threadBinding
+    const task = this._threadBinding
       .getState()
       .append(
         toAppendMessage(this._threadBinding.getState().messages, message),
       );
+    // An undispatched send is reported to the composer, so it is a control
+    // signal rather than a failure to surface; every other rejection keeps
+    // reaching the host untouched.
+    void Promise.resolve(task).catch((error) => {
+      if (!isMessageNotSentError(error)) throw error;
+    });
+  }
+
+  public deleteMessage(messageId: string) {
+    return this._threadBinding.getState().deleteMessage(messageId);
   }
 
   public subscribe(callback: () => void) {
-    return this._threadBinding.subscribe(callback);
+    return this._stateBinding.subscribe(callback);
   }
 
   public getModelContext() {
     return this._threadBinding.getState().getModelContext();
   }
 
-  public getModelConfig() {
-    return this.getModelContext();
-  }
-
-  public startRun(configOrParentId: string | null | CreateStartRunConfig) {
-    const config =
-      configOrParentId === null || typeof configOrParentId === "string"
-        ? { parentId: configOrParentId }
-        : configOrParentId;
+  public startRun(config: CreateStartRunConfig) {
     return this._threadBinding.getState().startRun(toStartRunConfig(config));
   }
 
-  public unstable_resumeRun(config: CreateResumeRunConfig) {
+  public resumeRun(config: CreateResumeRunConfig) {
     return this._threadBinding.getState().resumeRun(toResumeRunConfig(config));
   }
 
@@ -443,16 +479,40 @@ export class ThreadRuntimeImpl implements ThreadRuntime {
     this._threadBinding.getState().importExternalState(state);
   }
 
-  public unstable_loadExternalState(state: any) {
-    this._threadBinding.getState().unstable_loadExternalState(state);
-  }
-
   public cancelRun() {
     this._threadBinding.getState().cancelRun();
   }
 
+  public unstable_notifySessionReset() {
+    this._threadBinding.getState().unstable_notifySessionReset();
+  }
+
   public stopSpeaking() {
     return this._threadBinding.getState().stopSpeaking();
+  }
+
+  public connectVoice() {
+    this._threadBinding.getState().connectVoice();
+  }
+
+  public disconnectVoice() {
+    this._threadBinding.getState().disconnectVoice();
+  }
+
+  public getVoiceVolume() {
+    return this._threadBinding.getState().getVoiceVolume();
+  }
+
+  public subscribeVoiceVolume(callback: () => void) {
+    return this._threadBinding.getState().subscribeVoiceVolume(callback);
+  }
+
+  public muteVoice() {
+    this._threadBinding.getState().muteVoice();
+  }
+
+  public unmuteVoice() {
+    this._threadBinding.getState().unmuteVoice();
   }
 
   public export() {
@@ -521,7 +581,6 @@ export class ThreadRuntimeImpl implements ThreadRuntime {
           const thread = this._threadBinding.getState();
 
           const branches = thread.getBranches(message.id);
-          const submittedFeedback = message.metadata.submittedFeedback;
 
           return {
             ...message,
@@ -536,8 +595,6 @@ export class ThreadRuntimeImpl implements ThreadRuntime {
 
             speech:
               speechState?.messageId === message.id ? speechState : undefined,
-
-            submittedFeedback,
           } satisfies MessageState;
         },
         subscribe: (callback) => this._threadBinding.subscribe(callback),
@@ -551,18 +608,18 @@ export class ThreadRuntimeImpl implements ThreadRuntime {
     EventSubscriptionSubject<ThreadRuntimeEventType>
   >();
 
-  public unstable_on(
-    event: ThreadRuntimeEventType,
-    callback: () => void,
+  public unstable_on<E extends ThreadRuntimeEventType>(
+    event: E,
+    callback: ThreadRuntimeEventCallback<E>,
   ): Unsubscribe {
     let subject = this._eventSubscriptionSubjects.get(event);
     if (!subject) {
-      subject = new EventSubscriptionSubject({
-        event: event,
+      subject = new EventSubscriptionSubject<ThreadRuntimeEventType>({
+        event,
         binding: this._threadBinding,
       });
       this._eventSubscriptionSubjects.set(event, subject);
     }
-    return subject.subscribe(callback);
+    return subject.subscribe(callback as (payload?: unknown) => void);
   }
 }

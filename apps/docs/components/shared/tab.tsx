@@ -43,11 +43,11 @@ const tabIndicatorVariants = cva(
   {
     variants: {
       variant: {
-        ghost: "bottom-0 h-[2px] bg-foreground",
-        default: "bottom-0 h-[2px] bg-primary",
-        outline: "bottom-0 h-[2px] bg-foreground",
-        secondary: "bottom-0 h-[2px] bg-secondary-foreground",
-        link: "bottom-0 h-[2px] bg-primary",
+        ghost: "bg-foreground bottom-0 h-[2px]",
+        default: "bg-primary bottom-0 h-[2px]",
+        outline: "bg-foreground bottom-0 h-[2px]",
+        secondary: "bg-secondary-foreground bottom-0 h-[2px]",
+        link: "bg-primary bottom-0 h-[2px]",
       },
       orientation: {
         horizontal: "bottom-0 h-[2px]",
@@ -62,19 +62,19 @@ const tabIndicatorVariants = cva(
 );
 
 const tabItemVariants = cva(
-  "relative flex h-[30px] cursor-pointer items-center justify-center gap-2 whitespace-nowrap rounded-md px-3 py-2 text-sm leading-5 transition-all duration-300 focus:outline-none data-[active=true]:font-medium",
+  "focus-visible:ring-ring/50 relative flex h-[30px] cursor-pointer items-center justify-center gap-2 rounded-md px-3 py-2 text-[13px] leading-5 tracking-tight whitespace-nowrap transition-all duration-300 outline-none focus-visible:ring-1 focus-visible:ring-inset data-[active=true]:font-medium",
   {
     variants: {
       variant: {
         ghost:
-          "border-transparent bg-transparent data-[active=true]:bg-foreground/5 data-[active=true]:text-foreground",
+          "data-[active=true]:bg-foreground/5 data-[active=true]:text-foreground border-transparent bg-transparent",
         default:
-          "border border-border/50 bg-background/50 text-muted-foreground hover:border-border hover:bg-background hover:text-foreground data-[active=true]:border-border data-[active=true]:bg-background data-[active=true]:text-foreground data-[active=true]:shadow-sm",
+          "border-border/50 bg-background/50 text-muted-foreground hover:border-border hover:bg-background hover:text-foreground data-[active=true]:border-border data-[active=true]:bg-background data-[active=true]:text-foreground border",
         outline:
-          "border border-border/30 bg-transparent text-muted-foreground hover:border-border hover:bg-accent/50 hover:text-foreground data-[active=true]:border-border data-[active=true]:bg-accent/30 data-[active=true]:text-foreground",
+          "border-border/30 text-muted-foreground hover:border-border hover:bg-accent/50 hover:text-foreground data-[active=true]:border-border data-[active=true]:bg-accent/30 data-[active=true]:text-foreground border bg-transparent",
         secondary:
-          "border-transparent bg-secondary/30 text-secondary-foreground/80 hover:bg-secondary/50 hover:text-secondary-foreground data-[active=true]:bg-secondary/70 data-[active=true]:text-secondary-foreground",
-        link: "border-transparent bg-transparent text-muted-foreground hover:text-primary data-[active=true]:text-primary",
+          "bg-secondary/30 text-secondary-foreground/80 hover:bg-secondary/50 hover:text-secondary-foreground data-[active=true]:bg-secondary/70 data-[active=true]:text-secondary-foreground border-transparent",
+        link: "text-muted-foreground hover:text-primary data-[active=true]:text-primary border-transparent bg-transparent",
       },
     },
     defaultVariants: {
@@ -90,12 +90,14 @@ function Tab({
   variant = "ghost",
   orientation,
   onTabChange,
+  actions,
   ...props
 }: React.ComponentProps<"div"> & {
   tabs: TabItem[];
   defaultActiveIndex?: number;
   variant?: "ghost" | "default" | "outline" | "secondary" | "link";
   onTabChange?: (label: string, index: number) => void;
+  actions?: React.ReactNode;
 } & VariantProps<typeof tabSwitcherVariants>) {
   const pathname = usePathname();
   const [hoveredIndex, setHoveredIndex] = React.useState<number | null>(null);
@@ -214,40 +216,50 @@ function Tab({
       {...props}
     >
       <TabList orientation={resolvedOrientation}>
-        <TabContainer>
-          {showIndicator && (
-            <TabIndicator
-              activeStyle={activeStyle}
-              hoveredIndex={hoveredIndex}
-              hoverStyle={hoverStyle}
-              orientation={resolvedOrientation}
-              variant={variant}
-            />
-          )}
-          {tabs.map((tab, index) => (
-            <TabItem
-              index={index}
-              isActive={
-                isPureNavigationMode
-                  ? Boolean(
-                      tab.href &&
+        <div className="flex items-center gap-2">
+          <TabContainer className="min-w-0 flex-1">
+            {showIndicator && (
+              <TabIndicator
+                activeStyle={activeStyle}
+                hoveredIndex={hoveredIndex}
+                hoverStyle={hoverStyle}
+                orientation={resolvedOrientation}
+                variant={variant}
+              />
+            )}
+            {tabs.map((tab, index) => (
+              <TabItem
+                index={index}
+                isActive={
+                  isPureNavigationMode
+                    ? Boolean(
+                        tab.href &&
                         (tab.isActive
                           ? tab.isActive(pathname)
                           : pathname === tab.href),
-                    )
-                  : tab.value !== undefined && index === contentActiveIndex
-              }
-              key={tab.label}
-              onClick={() => handleContentTabClick(index)}
-              onKeyDown={(e) => handleKeyDown(index, e)}
-              onMouseEnter={() => setHoveredIndex(index)}
-              onMouseLeave={() => setHoveredIndex(null)}
-              tab={tab}
-              tabRefs={tabRefs}
-              variant={variant}
-            />
-          ))}
-        </TabContainer>
+                      )
+                    : tab.value !== undefined && index === contentActiveIndex
+                }
+                key={tab.label}
+                onClick={() => handleContentTabClick(index)}
+                onKeyDown={(e) => handleKeyDown(index, e)}
+                onMouseEnter={() => setHoveredIndex(index)}
+                onMouseLeave={() => setHoveredIndex(null)}
+                tab={tab}
+                tabRefs={tabRefs}
+                variant={variant}
+              />
+            ))}
+          </TabContainer>
+          {actions && (
+            <div
+              className="flex flex-none items-center gap-1 pb-2"
+              data-slot="tab-actions"
+            >
+              {actions}
+            </div>
+          )}
+        </div>
       </TabList>
 
       {/* Content panel - show when there are content tabs */}
@@ -303,7 +315,7 @@ function TabIndicator({
         hoverStyle.width &&
         Number.parseFloat(String(hoverStyle.width)) > 0 && (
           <div
-            className="absolute flex h-[30px] items-center rounded-md bg-foreground/8 transition-all duration-300 ease-out"
+            className="bg-foreground/8 absolute flex h-[30px] items-center rounded-md transition-all duration-300 ease-out"
             data-slot="tab-hover-indicator"
             style={hoverStyle}
             {...props}
@@ -327,7 +339,7 @@ function TabContainer({ className, ...props }: React.ComponentProps<"div">) {
   return (
     <div
       className={cn(
-        "scrollbar-none relative flex items-center space-x-[6px] overflow-x-auto pb-2",
+        "relative flex scrollbar-none items-center space-x-[6px] overflow-x-auto pb-2",
         className,
       )}
       data-slot="tab-container"

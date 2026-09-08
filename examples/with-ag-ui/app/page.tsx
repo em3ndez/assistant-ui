@@ -1,18 +1,18 @@
 "use client";
 
 import {
-  useAssistantRuntime,
-  useAssistantTool,
+  defineToolkit,
   useAui,
   AuiProvider,
+  AuiConfig,
   Suggestions,
+  Tools,
 } from "@assistant-ui/react";
-import { Thread } from "@/components/assistant-ui/thread";
+import { Thread } from "@/components/assistant-ui/elements/thread.aui";
 import { PlusIcon } from "lucide-react";
 
-function BrowserAlertTool() {
-  useAssistantTool<{ message: string }, { status: string }>({
-    toolName: "browser_alert",
+const toolkit = defineToolkit({
+  browser_alert: {
     description: "Display a native browser alert dialog to the user.",
     parameters: {
       type: "object",
@@ -29,33 +29,32 @@ function BrowserAlertTool() {
       return { status: "shown" };
     },
     render: ({ args, result }) => (
-      <div className="mt-3 w-full max-w-[var(--thread-max-width)] rounded-lg border px-4 py-3 text-sm">
-        <p className="font-semibold text-muted-foreground">browser_alert</p>
+      <div className="mt-3 w-full max-w-(--thread-max-width) rounded-lg border px-4 py-3 text-sm">
+        <p className="text-muted-foreground font-semibold">browser_alert</p>
         <p className="mt-1">
           Requested alert with message:
-          <span className="ml-1 font-mono text-foreground">
+          <span className="text-foreground ml-1 font-mono">
             {JSON.stringify(args.message)}
           </span>
         </p>
         {result?.status === "shown" && (
-          <p className="mt-2 text-foreground/70 text-xs">
+          <p className="text-foreground/70 mt-2 text-xs">
             Alert displayed in this tab.
           </p>
         )}
       </div>
     ),
-  });
-
-  return null;
-}
+  },
+});
 
 function NewThreadButton() {
-  const runtime = useAssistantRuntime();
+  const aui = useAui();
 
   return (
     <button
-      onClick={() => runtime.switchToNewThread()}
-      className="absolute top-4 right-4 z-10 flex items-center gap-2 rounded-lg border bg-background px-3 py-2 font-medium text-sm shadow-sm transition-colors hover:bg-accent"
+      type="button"
+      onClick={() => aui.threads.switchToNewThread()}
+      className="bg-background hover:bg-accent absolute top-4 right-4 z-10 flex items-center gap-2 rounded-lg border px-3 py-2 text-sm font-medium shadow-sm transition-colors"
     >
       <PlusIcon className="size-4" />
       New Thread
@@ -64,7 +63,8 @@ function NewThreadButton() {
 }
 
 function ThreadWithSuggestions() {
-  const aui = useAui({
+  const aui = useAui();
+  const config = AuiConfig({
     suggestions: Suggestions([
       {
         title: "Run a web search",
@@ -79,18 +79,24 @@ function ThreadWithSuggestions() {
     ]),
   });
   return (
-    <AuiProvider value={aui}>
+    <AuiProvider extends={aui} config={config}>
       <Thread />
     </AuiProvider>
   );
 }
 
 export default function Home() {
+  const aui = useAui();
+  const config = AuiConfig({
+    tools: Tools({ toolkit }),
+  });
+
   return (
-    <main className="relative h-dvh">
-      <NewThreadButton />
-      <ThreadWithSuggestions />
-      <BrowserAlertTool />
-    </main>
+    <AuiProvider extends={aui} config={config}>
+      <main className="relative h-dvh">
+        <NewThreadButton />
+        <ThreadWithSuggestions />
+      </main>
+    </AuiProvider>
   );
 }

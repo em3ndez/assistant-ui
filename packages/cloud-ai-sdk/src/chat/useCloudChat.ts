@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo } from "react";
+import { useCallback, useEffect, useMemo } from "react";
 import { useChat } from "@ai-sdk/react";
 import { AssistantCloud } from "assistant-cloud";
 import type {
@@ -16,7 +16,7 @@ import type { CloudChatCore } from "../core/CloudChatCore";
 
 const autoCloudBaseUrl =
   typeof process !== "undefined"
-    ? process.env["NEXT_PUBLIC_ASSISTANT_BASE_URL"]
+    ? process.env.NEXT_PUBLIC_ASSISTANT_BASE_URL
     : undefined;
 const autoCloud = autoCloudBaseUrl
   ? new AssistantCloud({ baseUrl: autoCloudBaseUrl, anonymous: true })
@@ -45,9 +45,21 @@ export function useCloudChat(
     transport,
   });
 
+  const createChat = useCallback(
+    (chatKey: string, registry: ChatRegistry) =>
+      core.createChat(chatKey, registry),
+    [core],
+  );
+  const createRenderChat = useCallback(
+    (chatKey: string, registry: ChatRegistry) =>
+      core.createChat(chatKey, registry, chatConfig),
+    [chatConfig, core],
+  );
   const { registry, activeChat } = useChatRegistry({
+    scope: threads.cloud,
     threadId: threads.threadId,
-    createChat: (chatKey, reg) => core.createChat(chatKey, reg),
+    createChat,
+    createRenderChat,
   });
 
   useThreadMessageLoader(threads.threadId, registry, core);
@@ -92,15 +104,19 @@ function useThreadMessageLoader(
     }
 
     const cancelledRef = { cancelled: false };
-    meta.loading = core.loadThreadMessages(
+    const loading = core.loadThreadMessages(
       threadId,
       chatKey,
       registry,
       cancelledRef,
     );
+    meta.loading = loading;
 
     return () => {
       cancelledRef.cancelled = true;
+      if (meta.loading === loading) {
+        meta.loading = null;
+      }
     };
   }, [threadId, registry, core]);
 }

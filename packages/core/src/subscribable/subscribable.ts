@@ -1,15 +1,9 @@
-import type { Unsubscribe } from "../types";
-
-// =============================================================================
-// Sentinel
-// =============================================================================
+import { shallowEqual } from "@assistant-ui/store/client";
+import type { Unsubscribe } from "../types/unsubscribe";
+import { notifyEventListeners } from "../utils/notify-event-listeners";
 
 export const SKIP_UPDATE = Symbol("skip-update");
 export type SKIP_UPDATE = typeof SKIP_UPDATE;
-
-// =============================================================================
-// Types
-// =============================================================================
 
 export type Subscribable = {
   subscribe: (callback: () => void) => Unsubscribe;
@@ -29,37 +23,45 @@ export type EventSubscribable<TEvent extends string> = {
   event: TEvent;
   binding: SubscribableWithState<
     | {
-        unstable_on: (event: TEvent, callback: () => void) => Unsubscribe;
+        unstable_on: (
+          event: TEvent,
+          callback: (payload?: unknown) => void,
+        ) => Unsubscribe;
       }
     | undefined,
     unknown
   >;
 };
 
-// =============================================================================
-// Utilities
-// =============================================================================
-
-function shallowEqual<T extends object>(
-  objA: T | undefined,
-  objB: T | undefined,
-) {
-  if (objA === undefined && objB === undefined) return true;
-  if (objA === undefined) return false;
-  if (objB === undefined) return false;
-
-  for (const key of Object.keys(objA)) {
-    const valueA = objA[key as keyof T];
-    const valueB = objB[key as keyof T];
-    if (!Object.is(valueA, valueB)) return false;
+export const notifySubscribers = <TArgs extends unknown[]>(
+  subscribers: Iterable<(...args: TArgs) => void>,
+  ...args: TArgs
+): void => {
+  const errors: unknown[] = [];
+  for (const callback of subscribers) {
+    try {
+      callback(...args);
+    } catch (error) {
+      errors.push(error);
+    }
   }
 
-  return true;
-}
+  if (errors.length === 1) {
+    throw errors[0];
+  }
 
-// =============================================================================
-// Base Subscribable (simple pub-sub)
-// =============================================================================
+  if (errors.length > 1) {
+    for (const error of errors) {
+      console.error(error);
+    }
+    throw new AggregateError(errors);
+  }
+};
+
+const shallowEqualOrUndefined = <T extends object>(
+  a: T | undefined,
+  b: T | undefined,
+) => (a === undefined || b === undefined ? a === b : shallowEqual(a, b));
 
 export class BaseSubscribable {
   private _subscribers = new Set<() => void>();
@@ -79,34 +81,39 @@ export class BaseSubscribable {
   }
 
   protected _notifySubscribers() {
-    const errors = [];
-    for (const callback of this._subscribers) {
-      try {
-        callback();
-      } catch (error) {
-        errors.push(error);
-      }
-    }
-
-    if (errors.length > 0) {
-      if (errors.length === 1) {
-        throw errors[0];
-      } else {
-        for (const error of errors) {
-          console.error(error);
-        }
-        throw new AggregateError(errors);
-      }
-    }
+    notifySubscribers(this._subscribers);
   }
 }
 
-// =============================================================================
-// Base Subject (lazy connect/disconnect)
-// =============================================================================
+export class WritableSubscribable<TState> extends BaseSubscribable {
+  private _state: TState;
 
+  constructor(state: TState) {
+    super();
+    this._state = state;
+    this.subscribe = this.subscribe.bind(this);
+    this.getState = this.getState.bind(this);
+    // Hydration has to agree with what the server rendered, so the server
+    // snapshot stays at the creation-time state rather than following writes.
+    this.getServerSnapshot = () => state;
+  }
+
+  public getState(): TState {
+    return this._state;
+  }
+
+  public getServerSnapshot: () => TState;
+
+  public setState(state: TState): void {
+    if (Object.is(state, this._state)) return;
+    this._state = state;
+    this._notifySubscribers();
+  }
+}
+
+// lazy connect/disconnect: only opens upstream subscription while it has subscribers
 export abstract class BaseSubject {
-  private _subscriptions = new Set<() => void>();
+  private _subscriptions = new Set<(payload?: unknown) => void>();
   private _connection: Unsubscribe | undefined;
 
   protected get isConnected() {
@@ -115,8 +122,13 @@ export abstract class BaseSubject {
 
   protected abstract _connect(): Unsubscribe;
 
-  protected notifySubscribers() {
-    for (const callback of this._subscriptions) callback();
+  protected notifySubscribers(payload?: unknown, errorContext?: string) {
+    if (errorContext) {
+      notifyEventListeners(this._subscriptions, payload, errorContext);
+      return;
+    }
+
+    notifySubscribers(this._subscriptions, payload);
   }
 
   private _updateConnection() {
@@ -129,7 +141,7 @@ export abstract class BaseSubject {
     }
   }
 
-  public subscribe(callback: () => void) {
+  public subscribe(callback: (payload?: unknown) => void) {
     this._subscriptions.add(callback);
     this._updateConnection();
 
@@ -140,10 +152,6 @@ export abstract class BaseSubject {
   }
 }
 
-// =============================================================================
-// Subject Implementations
-// =============================================================================
-
 export class ShallowMemoizeSubject<TState extends object, TPath>
   extends BaseSubject
   implements SubscribableWithState<TState, TPath>
@@ -152,10 +160,11 @@ export class ShallowMemoizeSubject<TState extends object, TPath>
     return this.binding.path;
   }
 
-  constructor(
-    private binding: SubscribableWithState<TState | SKIP_UPDATE, TPath>,
-  ) {
+  private binding: SubscribableWithState<TState | SKIP_UPDATE, TPath>;
+
+  constructor(binding: SubscribableWithState<TState | SKIP_UPDATE, TPath>) {
     super();
+    this.binding = binding;
     const state = binding.getState();
     if (state === SKIP_UPDATE)
       throw new Error("Entry not available in the store");
@@ -171,7 +180,7 @@ export class ShallowMemoizeSubject<TState extends object, TPath>
   private _syncState() {
     const state = this.binding.getState();
     if (state === SKIP_UPDATE) return false;
-    if (shallowEqual(state, this._previousState)) return false;
+    if (shallowEqualOrUndefined(state, this._previousState)) return false;
     this._previousState = state;
     return true;
   }
@@ -183,7 +192,9 @@ export class ShallowMemoizeSubject<TState extends object, TPath>
       }
     };
 
-    return this.binding.subscribe(callback);
+    const unsubscribe = this.binding.subscribe(callback);
+    this._syncState();
+    return unsubscribe;
   }
 }
 
@@ -195,10 +206,11 @@ export class LazyMemoizeSubject<TState extends object, TPath>
     return this.binding.path;
   }
 
-  constructor(
-    private binding: SubscribableWithState<TState | SKIP_UPDATE, TPath>,
-  ) {
+  private binding: SubscribableWithState<TState | SKIP_UPDATE, TPath>;
+
+  constructor(binding: SubscribableWithState<TState | SKIP_UPDATE, TPath>) {
     super();
+    this.binding = binding;
   }
 
   private _previousStateDirty = true;
@@ -206,7 +218,11 @@ export class LazyMemoizeSubject<TState extends object, TPath>
   public getState = () => {
     if (!this.isConnected || this._previousStateDirty) {
       const newState = this.binding.getState();
-      if (newState !== SKIP_UPDATE) {
+      if (
+        newState !== SKIP_UPDATE &&
+        (this._previousState === undefined ||
+          !shallowEqualOrUndefined(newState, this._previousState))
+      ) {
         this._previousState = newState;
       }
       this._previousStateDirty = false;
@@ -222,14 +238,16 @@ export class LazyMemoizeSubject<TState extends object, TPath>
       this.notifySubscribers();
     };
 
-    return this.binding.subscribe(callback);
+    const unsubscribe = this.binding.subscribe(callback);
+    this._previousStateDirty = true;
+    return unsubscribe;
   }
 }
 
 export class NestedSubscriptionSubject<
-    TState extends Subscribable | undefined,
-    TPath,
-  >
+  TState extends Subscribable | undefined,
+  TPath,
+>
   extends BaseSubject
   implements
     SubscribableWithState<TState, TPath>,
@@ -239,8 +257,11 @@ export class NestedSubscriptionSubject<
     return this.binding.path;
   }
 
-  constructor(private binding: NestedSubscribable<TState, TPath>) {
+  private binding: NestedSubscribable<TState, TPath>;
+
+  constructor(binding: NestedSubscribable<TState, TPath>) {
     super();
+    this.binding = binding;
   }
 
   public getState() {
@@ -280,8 +301,11 @@ export class NestedSubscriptionSubject<
 export class EventSubscriptionSubject<
   TEvent extends string,
 > extends BaseSubject {
-  constructor(private config: EventSubscribable<TEvent>) {
+  private config: EventSubscribable<TEvent>;
+
+  constructor(config: EventSubscribable<TEvent>) {
     super();
+    this.config = config;
   }
 
   public getState() {
@@ -293,8 +317,9 @@ export class EventSubscriptionSubject<
   }
 
   protected _connect(): Unsubscribe {
-    const callback = () => {
-      this.notifySubscribers();
+    const errorContext = `Runtime event "${this.config.event}"`;
+    const callback = (payload?: unknown) => {
+      this.notifySubscribers(payload, errorContext);
     };
 
     let lastState = this.config.binding.getState();

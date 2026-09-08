@@ -1,10 +1,13 @@
-import type { ReactNode } from "react";
-import { Pressable, type PressableProps } from "react-native";
 import { useCallback } from "react";
+import { Pressable, type PressableProps } from "react-native";
+
 import { useAui } from "@assistant-ui/store";
 
-export type AttachmentRemoveProps = Omit<PressableProps, "onPress"> & {
-  children: ReactNode;
+export type AttachmentRemoveProps = Omit<
+  PressableProps,
+  "onPress" | "children"
+> & {
+  children: PressableProps["children"];
 };
 
 export const AttachmentRemove = ({
@@ -14,11 +17,15 @@ export const AttachmentRemove = ({
   const aui = useAui();
 
   const handleRemove = useCallback(() => {
-    aui.attachment().remove();
+    aui.attachment.remove();
   }, [aui]);
 
   return (
-    <Pressable onPress={handleRemove} {...pressableProps}>
+    <Pressable
+      onPress={handleRemove}
+      accessibilityRole="button"
+      {...pressableProps}
+    >
       {children}
     </Pressable>
   );

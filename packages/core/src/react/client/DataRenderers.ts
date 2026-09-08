@@ -1,14 +1,23 @@
-import { resource, tapState, tapCallback } from "@assistant-ui/tap";
-import { type ClientOutput } from "@assistant-ui/store";
-import { DataRenderersState } from "../types/scopes";
-import { DataMessagePartComponent } from "../types";
+import { useState, useCallback } from "react";
+import { resource } from "@assistant-ui/tap";
+import type { ClientOutput } from "@assistant-ui/store";
+import type { DataRenderersState } from "../types/scopes/dataRenderers";
+import type { DataMessagePartComponent } from "../types/MessagePartComponentTypes";
 
-export const DataRenderers = resource((): ClientOutput<"dataRenderers"> => {
-  const [state, setState] = tapState<DataRenderersState>(() => ({
+/**
+ * Registers renderers for `data` message parts.
+ *
+ * Data renderers are looked up by the part's `name` field. Use this resource
+ * directly for a renderer scope, or prefer {@link useAssistantDataUI} /
+ * {@link makeAssistantDataUI} when registering from React components.
+ */
+const useDataRenderers = (): ClientOutput<"dataRenderers"> => {
+  const [state, setState] = useState<DataRenderersState>(() => ({
     renderers: {},
+    fallbacks: [],
   }));
 
-  const setDataUI = tapCallback(
+  const setDataUI = useCallback(
     (name: string, render: DataMessagePartComponent) => {
       setState((prev) => {
         return {
@@ -35,8 +44,25 @@ export const DataRenderers = resource((): ClientOutput<"dataRenderers"> => {
     [],
   );
 
+  const setFallbackDataUI = useCallback((render: DataMessagePartComponent) => {
+    setState((prev) => ({
+      ...prev,
+      fallbacks: [...prev.fallbacks, render],
+    }));
+
+    return () => {
+      setState((prev) => ({
+        ...prev,
+        fallbacks: prev.fallbacks.filter((r) => r !== render),
+      }));
+    };
+  }, []);
+
   return {
     getState: () => state,
     setDataUI,
+    setFallbackDataUI,
   };
-});
+};
+
+export const DataRenderers = resource(useDataRenderers);

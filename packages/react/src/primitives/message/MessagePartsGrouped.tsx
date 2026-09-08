@@ -4,14 +4,12 @@ import {
   type ComponentType,
   type FC,
   memo,
-  PropsWithChildren,
+  type PropsWithChildren,
   useMemo,
 } from "react";
 import { useAuiState, useAui } from "@assistant-ui/store";
-import {
-  PartByIndexProvider,
-  TextMessagePartProvider,
-} from "../../context/providers";
+import { PartByIndexProvider } from "../../context/providers/PartByIndexProvider";
+import { TextMessagePartProvider } from "../../context/providers/TextMessagePartProvider";
 import { MessagePartPrimitiveText } from "../messagePart/MessagePartText";
 import { MessagePartPrimitiveImage } from "../messagePart/MessagePartImage";
 import type {
@@ -26,7 +24,7 @@ import type {
   ToolCallMessagePartProps,
   FileMessagePartComponent,
   ReasoningMessagePartComponent,
-} from "../../types";
+} from "@assistant-ui/core/react";
 import { MessagePartPrimitiveInProgress } from "../messagePart/MessagePartInProgress";
 import type { MessagePartStatus } from "@assistant-ui/core";
 
@@ -46,7 +44,7 @@ const groupMessagePartsByParentId: GroupingFunction = (
   parts: readonly any[],
 ): MessagePartGroup[] => {
   // Map maintains insertion order, so groups appear in order of first occurrence
-  const groupMap = new Map<string, number[]>();
+  const groupMap = new Map<string | number, number[]>();
 
   // Process each part in order
   for (let i = 0; i < parts.length; i++) {
@@ -54,7 +52,7 @@ const groupMessagePartsByParentId: GroupingFunction = (
     const parentId = part?.parentId as string | undefined;
 
     // For parts without parentId, assign a unique group ID to maintain their position
-    const groupId = parentId ?? `__ungrouped_${i}`;
+    const groupId = parentId ?? i;
 
     // Get or create the indices array for this group
     const indices = groupMap.get(groupId) ?? [];
@@ -66,7 +64,7 @@ const groupMessagePartsByParentId: GroupingFunction = (
   const groups: MessagePartGroup[] = [];
   for (const [groupId, indices] of groupMap) {
     // Extract parentId (undefined for ungrouped parts)
-    const groupKey = groupId.startsWith("__ungrouped_") ? undefined : groupId;
+    const groupKey = typeof groupId === "string" ? groupId : undefined;
     groups.push({ groupKey, indices });
   }
 
@@ -96,15 +94,15 @@ export namespace MessagePrimitiveUnstable_PartsGrouped {
      * ```tsx
      * // Group by parent ID (default behavior)
      * groupingFunction={(parts) => {
-     *   const groups = new Map<string, number[]>();
+     *   const groups = new Map<string | number, number[]>();
      *   parts.forEach((part, i) => {
-     *     const key = part.parentId ?? `__ungrouped_${i}`;
+     *     const key = part.parentId ?? i;
      *     const indices = groups.get(key) ?? [];
      *     indices.push(i);
      *     groups.set(key, indices);
      *   });
      *   return Array.from(groups.entries()).map(([key, indices]) => ({
-     *     key: key.startsWith("__ungrouped_") ? undefined : key,
+     *     groupKey: typeof key === "string" ? key : undefined,
      *     indices
      *   }));
      * }}
@@ -153,7 +151,12 @@ export namespace MessagePrimitiveUnstable_PartsGrouped {
           Image?: ImageMessagePartComponent | undefined;
           /** Component for rendering file content */
           File?: FileMessagePartComponent | undefined;
-          /** Component for rendering audio content (experimental) */
+          /**
+           * Component for rendering audio content.
+           *
+           * @deprecated Render audio through the `File` slot instead, branching
+           * on an `audio/*` mime type.
+           */
           Unstable_Audio?: Unstable_AudioMessagePartComponent | undefined;
           /** Configuration for data part rendering */
           data?:
@@ -232,11 +235,9 @@ const ToolUIDisplay = ({
 }: {
   Fallback: ToolCallMessagePartComponent | undefined;
 } & ToolCallMessagePartProps) => {
-  const Render = useAuiState((s) => {
-    const Render = s.tools.tools[props.toolName] ?? Fallback;
-    if (Array.isArray(Render)) return Render[0] ?? Fallback;
-    return Render;
-  });
+  const Render = useAuiState(
+    (s) => s.tools.toolUIs[props.toolName]?.[0]?.render ?? Fallback,
+  );
   if (!Render) return null;
   return <Render {...props} />;
 };
@@ -294,10 +295,18 @@ const MessagePartComponent: FC<MessagePartComponentProps> = ({
 
   const type = part.type;
   if (type === "tool-call") {
-    const addResult = aui.part().addToolResult;
-    const resume = aui.part().resumeToolCall;
+    const addResult = aui.part.addToolResult;
+    const resume = aui.part.resumeToolCall;
+    const respondToApproval = aui.part.respondToToolApproval;
     if ("Override" in tools)
-      return <tools.Override {...part} addResult={addResult} resume={resume} />;
+      return (
+        <tools.Override
+          {...part}
+          addResult={addResult}
+          resume={resume}
+          respondToApproval={respondToApproval}
+        />
+      );
     const Tool = tools.by_name?.[part.toolName] ?? tools.Fallback;
     return (
       <ToolUIDisplay
@@ -305,6 +314,7 @@ const MessagePartComponent: FC<MessagePartComponentProps> = ({
         Fallback={Tool}
         addResult={addResult}
         resume={resume}
+        respondToApproval={respondToApproval}
       />
     );
   }
@@ -414,6 +424,12 @@ const EmptyParts = memo(
  * The grouping function receives all message parts and returns an array of groups,
  * where each group has a key and an array of part indices.
  *
+ * @deprecated Prefer `<MessagePrimitive.GroupedParts>` for adjacent
+ * grouping — it dispatches all rendering through one `switch (part.type)`
+ * and supports nested group paths. Keep this primitive only for
+ * non-adjacent clustering (e.g., gathering parts with the same parent-id
+ * across the message).
+ *
  * @example
  * ```tsx
  * // Group by parent ID (default behavior)
@@ -426,27 +442,6 @@ const EmptyParts = memo(
  *       return (
  *         <div className="parent-group border rounded p-4">
  *           <h4>Parent ID: {groupKey}</h4>
- *           {children}
- *         </div>
- *       );
- *     }
- *   }}
- * />
- * ```
- *
- * @example
- * ```tsx
- * // Group by tool name
- * import { groupMessagePartsByToolName } from "@assistant-ui/react";
- *
- * <MessagePrimitive.Unstable_PartsGrouped
- *   groupingFunction={groupMessagePartsByToolName}
- *   components={{
- *     Group: ({ groupKey, indices, children }) => {
- *       if (!groupKey) return <>{children}</>;
- *       return (
- *         <div className="tool-group">
- *           <h4>Tool: {groupKey}</h4>
  *           {children}
  *         </div>
  *       );

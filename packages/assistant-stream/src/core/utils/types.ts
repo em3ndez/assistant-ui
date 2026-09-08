@@ -1,7 +1,8 @@
-import {
+import type {
   ReadonlyJSONObject,
   ReadonlyJSONValue,
 } from "../../utils/json/json-value";
+import type { ToolModelContentPart } from "../tool/tool-types";
 
 type TextStatus =
   | {
@@ -31,6 +32,7 @@ export type ReasoningPart = {
   type: "reasoning";
   text: string;
   status: TextStatus;
+  unstable_summary?: string;
   parentId?: string;
 };
 
@@ -52,6 +54,19 @@ type ToolCallStatus =
       reason: "cancelled" | "length" | "content-filter" | "other";
     };
 
+/**
+ * Wall-clock timing of a tool call. Accumulator-populated timings are
+ * measured by the consuming accumulator, so resumed or replayed streams
+ * re-measure them; hosts that need authoritative timings supply the field
+ * themselves.
+ */
+export type ToolCallTiming = {
+  /** Epoch milliseconds when the tool call started streaming or executing. */
+  readonly startedAt: number;
+  /** Epoch milliseconds when the result landed. Absent while the call runs. */
+  readonly completedAt?: number;
+};
+
 type ToolCallPartBase = {
   type: "tool-call";
   status: ToolCallStatus;
@@ -59,8 +74,10 @@ type ToolCallPartBase = {
   toolName: string;
   argsText: string;
   args: ReadonlyJSONObject;
+  timing?: ToolCallTiming;
   artifact?: ReadonlyJSONValue;
   result?: ReadonlyJSONValue;
+  modelContent?: readonly ToolModelContentPart[];
   isError?: boolean;
   parentId?: string;
 };
@@ -68,12 +85,14 @@ type ToolCallPartBase = {
 type ToolCallPartWithoutResult = ToolCallPartBase & {
   state: "partial-call" | "call";
   result?: undefined;
+  modelContent?: undefined;
 };
 
 type ToolCallPartWithResult = ToolCallPartBase & {
   state: "result";
   result: ReadonlyJSONValue;
   artifact?: ReadonlyJSONValue;
+  modelContent?: readonly ToolModelContentPart[];
   isError?: boolean;
 };
 
@@ -92,6 +111,14 @@ export type FilePart = {
   type: "file";
   data: string;
   mimeType: string;
+  parentId?: string;
+};
+
+export type DataPart = {
+  type: "data";
+  name: string;
+  data: ReadonlyJSONValue;
+  parentId?: string;
 };
 
 export type AssistantMessagePart =
@@ -99,7 +126,8 @@ export type AssistantMessagePart =
   | ReasoningPart
   | ToolCallPart
   | SourcePart
-  | FilePart;
+  | FilePart
+  | DataPart;
 
 type AssistantMessageStepUsage = {
   inputTokens: number;

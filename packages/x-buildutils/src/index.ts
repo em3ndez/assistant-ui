@@ -1,151 +1,172 @@
-import ts from "typescript";
-import { promises as fs } from "node:fs";
-import path from "node:path";
-import { glob } from "tinyglobby";
-import { createExtensionTransformer } from "./extension-transformer";
+import { readFileSync, readdirSync, writeFileSync, existsSync } from "node:fs";
+import { resolve } from "node:path";
+import { build } from "tsdown";
+import { preserveReferenceDirectives } from "./reference-directives";
+import { reactCompiler } from "./react-compiler";
 
-/**
- * Builds a map of package name → set of exact export sub-paths
- * by reading the `exports` field of each dependency's package.json.
- */
-async function buildValidExportsMap(): Promise<Map<string, Set<string>>> {
-  const map = new Map<string, Set<string>>();
+const isDev = process.argv.slice(2).includes("dev");
 
-  try {
-    const pkgJson = JSON.parse(await fs.readFile("package.json", "utf-8"));
-    const allDeps = {
-      ...pkgJson.dependencies,
-      ...pkgJson.peerDependencies,
-    };
+const pkg = JSON.parse(
+  readFileSync(resolve(process.cwd(), "package.json"), "utf8"),
+);
 
-    for (const depName of Object.keys(allDeps)) {
-      try {
-        const depPkgPath = path.resolve(
-          "node_modules",
-          depName,
-          "package.json",
-        );
-        const depPkg = JSON.parse(await fs.readFile(depPkgPath, "utf-8"));
+// Dev mode: re-run the package's `start` script after every rebuild.
+let onSuccess: string | undefined;
+if (isDev && pkg.scripts?.start) onSuccess = pkg.scripts.start;
 
-        if (depPkg.exports) {
-          const validPaths = new Set<string>();
+// Bare "react" imports in tap-dependent packages route to a tap shim via
+// output `paths` (`alias` can't rewrite unbundled external imports); exact
+// specifiers only, so "react/jsx-runtime" and "react-dom" stay untouched.
+// Reactless packages get the standalone-shim, whose graph never imports react.
+const dependsOnTap = ["dependencies", "peerDependencies"].some(
+  (field) => pkg[field]?.["@assistant-ui/tap"],
+);
+const dependsOnReact = ["dependencies", "peerDependencies"].some(
+  (field) => pkg[field]?.react,
+);
+const isTapPackage = pkg.name === "@assistant-ui/tap";
+const remapReactToShim = dependsOnTap || isTapPackage;
+const isReactless = dependsOnTap && !dependsOnReact;
+const shimBase = isReactless
+  ? "@assistant-ui/tap/standalone-shim"
+  : "@assistant-ui/tap/react-shim";
+const packageImportExternals = Object.keys(pkg.imports ?? {});
 
-          if (
-            typeof depPkg.exports === "string" ||
-            Array.isArray(depPkg.exports)
-          ) {
-            validPaths.add(".");
-          } else {
-            const keys = Object.keys(depPkg.exports);
-            const hasSubpaths = keys.some((k) => k.startsWith("."));
-            if (hasSubpaths) {
-              for (const key of keys) {
-                if (key.startsWith(".")) validPaths.add(key);
-              }
-            } else {
-              // Conditional exports (e.g. { "import": "...", "require": "..." })
-              validPaths.add(".");
-            }
-          }
+// A package whose exports map targets `.cjs` files ships a bundled
+// CommonJS/node build (a Metro babel transformer must be `require`d
+// synchronously). Entries derive from the exports subpaths; declared
+// dependencies and peers stay external while workspace devDependencies are
+// bundled in, so an ESM-only workspace dependency can ride inside the CJS
+// artifact. Dual-format maps are rejected: every runtime target of a subpath
+// must agree on the format.
+const SELF_NAME = "@assistant-ui/x-buildutils";
 
-          map.set(depName, validPaths);
-        }
-      } catch {
-        // Dependency not resolvable — skip
-      }
-    }
-  } catch {
-    // No package.json — skip
+const collectRuntimeTargets = (value: unknown): string[] => {
+  if (typeof value === "string") return [value];
+  if (value === null || typeof value !== "object") return [];
+  return Object.entries(value as Record<string, unknown>).flatMap(
+    ([condition, nested]) =>
+      condition === "types" ? [] : collectRuntimeTargets(nested),
+  );
+};
+
+const exportEntries = Object.entries(pkg.exports ?? {}).map(([key, value]) => {
+  const targets = collectRuntimeTargets(value);
+  const cjs = targets.filter((target) => target.endsWith(".cjs"));
+  if (cjs.length > 0 && cjs.length !== targets.length) {
+    throw new Error(
+      `Exports subpath "${key}" mixes .cjs and non-.cjs runtime targets; a package builds as either CommonJS or ESM, not both.`,
+    );
   }
-
-  return map;
+  return { key, isCjs: targets.length > 0 && cjs.length === targets.length };
+});
+const cjsEntries = exportEntries.filter(({ isCjs }) => isCjs);
+if (cjsEntries.length > 0 && cjsEntries.length !== exportEntries.length) {
+  throw new Error(
+    "Exports map mixes .cjs and non-.cjs subpaths; a package builds as either CommonJS or ESM, not both.",
+  );
 }
 
-async function build() {
-  await fs.rm("dist", { recursive: true, force: true });
+if (cjsEntries.length > 0) {
+  const escapeRegExp = (name: string) =>
+    name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const externalDeps = Object.keys({
+    ...pkg.dependencies,
+    ...pkg.peerDependencies,
+  }).map((name) => new RegExp(`^${escapeRegExp(name)}(/|$)`));
+  const bundledWorkspaceDevDeps = Object.entries(
+    (pkg.devDependencies ?? {}) as Record<string, string>,
+  )
+    .filter(
+      ([name, range]) => name !== SELF_NAME && range.startsWith("workspace:"),
+    )
+    .map(([name]) => name);
 
-  const files = await glob(
-    ["src/**/*.{ts,tsx}", "!src/**/__tests__/**", "!src/**/*.test.{ts,tsx}"],
-    { absolute: true },
-  );
-
-  if (files.length === 0) {
-    throw new Error("No source files found in src/");
-  }
-
-  const configPath = ts.findConfigFile(
-    process.cwd(),
-    ts.sys.fileExists,
-    "tsconfig.json",
-  );
-  if (!configPath) throw new Error("Could not find tsconfig.json");
-
-  const configFile = ts.readConfigFile(configPath, ts.sys.readFile);
-  if (configFile.error) {
-    throw new Error(ts.formatDiagnostic(configFile.error, formatHost));
-  }
-
-  const parsedConfig = ts.parseJsonConfigFileContent(
-    configFile.config,
-    ts.sys,
-    path.dirname(configPath),
-  );
-
-  const validExportsMap = await buildValidExportsMap();
-
-  const program = ts.createProgram(files, {
-    ...parsedConfig.options,
-    outDir: "dist",
-    declaration: true,
-    declarationMap: true,
-    sourceMap: true,
-    noEmit: false,
-    emitDeclarationOnly: false,
-    // Strip aui-source so build uses dist types, not source
-    customConditions:
-      parsedConfig.options.customConditions?.filter(
-        (c) => c !== "aui-source",
-      ) ?? [],
+  await build({
+    entry: cjsEntries.map(({ key }) =>
+      key === "." ? "src/index.ts" : `src/${key.slice(2)}.ts`,
+    ),
+    format: "cjs",
+    platform: "node",
+    dts: isDev ? false : { sourcemap: true },
+    sourcemap: true,
+    watch: isDev,
+    ...(onSuccess ? { onSuccess } : {}),
+    deps: {
+      alwaysBundle: bundledWorkspaceDevDeps,
+      neverBundle: [/^node:/, ...externalDeps, ...packageImportExternals],
+    },
+    plugins: [preserveReferenceDirectives()],
   });
-
-  // JS: extension rewriting only
-  // .d.ts: extension rewriting + package sub-path rewriting
-  const extensionTransformer = createExtensionTransformer(program);
-  const declarationTransformer = createExtensionTransformer(
-    program,
-    validExportsMap,
-  );
-  const emitResult = program.emit(undefined, undefined, undefined, false, {
-    before: [extensionTransformer],
-    afterDeclarations: [
-      declarationTransformer as unknown as ts.TransformerFactory<
-        ts.Bundle | ts.SourceFile
-      >,
+} else {
+  await build({
+    entry: [
+      "src/**/*.{ts,tsx}",
+      "!src/**/__tests__/**",
+      "!src/**/*.test.{ts,tsx}",
+    ],
+    ...(remapReactToShim
+      ? {
+          outputOptions: (options) => ({
+            ...options,
+            paths: {
+              ...(options.paths as Record<string, string>),
+              react: shimBase,
+              "react/compiler-runtime": `${shimBase}/compiler-runtime`,
+            },
+          }),
+        }
+      : {}),
+    platform: "neutral",
+    unbundle: true,
+    deps: {
+      neverBundle: [/^node:/, ...packageImportExternals],
+      skipNodeModulesBundle: true,
+    },
+    dts: isDev ? false : { sourcemap: true },
+    sourcemap: true,
+    watch: isDev,
+    ...(onSuccess ? { onSuccess } : {}),
+    // React Compiler only for tap+react packages: its memo cache needs the
+    // shimmed compiler-runtime, and tap itself must never be compiled.
+    plugins: [
+      ...(dependsOnTap && dependsOnReact ? [reactCompiler()] : []),
+      preserveReferenceDirectives(),
     ],
   });
 
-  const diagnostics = ts
-    .getPreEmitDiagnostics(program)
-    .concat(emitResult.diagnostics);
-  if (diagnostics.length > 0) {
-    console.error(
-      ts.formatDiagnosticsWithColorAndContext(diagnostics, formatHost),
-    );
-    if (diagnostics.some((d) => d.category === ts.DiagnosticCategory.Error)) {
-      process.exit(1);
+  // `output.paths` also rewrites declarations; published `.d.ts` must reference
+  // real `react`, and tap's own shim runtime must not self-route.
+  if (remapReactToShim && !isDev && existsSync("dist")) {
+    for (const rel of readdirSync("dist", {
+      recursive: true,
+      encoding: "utf8",
+    })) {
+      if (typeof rel !== "string") continue;
+
+      const normalizedRel = rel.replaceAll("\\", "/");
+      const isDeclaration = normalizedRel.endsWith(".d.ts");
+      const isTapShimRuntime =
+        isTapPackage &&
+        normalizedRel.startsWith("react-shim/") &&
+        normalizedRel.endsWith(".js");
+
+      if (!isDeclaration && !isTapShimRuntime) continue;
+
+      const file = resolve("dist", rel);
+      const src = readFileSync(file, "utf8");
+      const out = src
+        .replaceAll(
+          `"${shimBase}/compiler-runtime"`,
+          '"react/compiler-runtime"',
+        )
+        .replaceAll(
+          `'${shimBase}/compiler-runtime'`,
+          "'react/compiler-runtime'",
+        )
+        .replaceAll(`"${shimBase}"`, '"react"')
+        .replaceAll(`'${shimBase}'`, "'react'");
+      if (out !== src) writeFileSync(file, out);
     }
   }
-
-  console.log(`Built ${files.length} files to dist/`);
 }
-
-const formatHost: ts.FormatDiagnosticsHost = {
-  getCanonicalFileName: (f) => f,
-  getCurrentDirectory: ts.sys.getCurrentDirectory,
-  getNewLine: () => "\n",
-};
-
-build().catch((err) => {
-  console.error(err);
-  process.exit(1);
-});

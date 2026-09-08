@@ -1,7 +1,7 @@
-/** biome-ignore-all lint/correctness/useExhaustiveDependencies: tests */
+/* oxlint-disable react/exhaustive-deps -- tests deliberately exercise invalid dep arrays */
 import { describe, it, expect, vi } from "vitest";
-import { tapEffect } from "../../hooks/tap-effect";
-import { tapState } from "../../hooks/tap-state";
+import { useEffect } from "../../react-hooks/useEffect";
+import { useState } from "../../react-hooks/useState";
 import { createTestResource, renderTest, waitForNextTick } from "../test-utils";
 import {
   renderResourceFiber,
@@ -15,14 +15,14 @@ describe("Lifecycle - Dependencies", () => {
     let setDep: any;
 
     const resource = createTestResource(() => {
-      const [dep, _setDep] = tapState(1);
+      const [dep, _setDep] = useState(1);
       setDep = _setDep;
 
-      tapEffect(effect, [dep]);
+      useEffect(effect, [dep]);
       return dep;
     });
 
-    renderTest(resource, undefined);
+    renderTest(resource);
     expect(effect).toHaveBeenCalledTimes(1);
 
     // Change dependency - this triggers automatic re-render
@@ -38,15 +38,15 @@ describe("Lifecycle - Dependencies", () => {
     let triggerRerender: any;
 
     const resource = createTestResource(() => {
-      const [count, setCount] = tapState(0);
-      const [dep] = tapState("constant");
+      const [count, setCount] = useState(0);
+      const [dep] = useState("constant");
       triggerRerender = setCount;
 
-      tapEffect(effect, [dep]);
+      useEffect(effect, [dep]);
       return { count, dep };
     });
 
-    renderTest(resource, undefined);
+    renderTest(resource);
     expect(effect).toHaveBeenCalledTimes(1);
 
     // Trigger re-render without changing dep
@@ -62,10 +62,10 @@ describe("Lifecycle - Dependencies", () => {
     let setDep: any;
 
     const resource = createTestResource(() => {
-      const [dep, _setDep] = tapState(1);
+      const [dep, _setDep] = useState(1);
       setDep = _setDep;
 
-      tapEffect(() => {
+      useEffect(() => {
         log.push(`effect-${dep}`);
         return () => log.push(`cleanup-${dep}`);
       }, [dep]);
@@ -73,13 +73,13 @@ describe("Lifecycle - Dependencies", () => {
       return dep;
     });
 
-    renderTest(resource, undefined);
+    renderTest(resource);
     expect(log).toEqual(["effect-1"]);
 
     // Change dep
     setDep(2);
-    const ctx = renderResourceFiber(resource, undefined);
-    commitResourceFiber(resource, ctx);
+    renderResourceFiber(resource, []);
+    commitResourceFiber(resource);
 
     expect(log).toEqual(["effect-1", "cleanup-1", "effect-2"]);
   });
@@ -89,14 +89,14 @@ describe("Lifecycle - Dependencies", () => {
     let triggerRerender: any;
 
     const resource = createTestResource(() => {
-      const [count, setCount] = tapState(0);
+      const [count, setCount] = useState(0);
       triggerRerender = setCount;
 
-      tapEffect(effect); // No deps = always re-run
+      useEffect(effect); // No deps = always re-run
       return count;
     });
 
-    renderTest(resource, undefined);
+    renderTest(resource);
     expect(effect).toHaveBeenCalledTimes(1);
 
     // Re-render
@@ -112,20 +112,20 @@ describe("Lifecycle - Dependencies", () => {
     let triggerRerender: any;
 
     const resource = createTestResource(() => {
-      const [count, setCount] = tapState(0);
+      const [count, setCount] = useState(0);
       triggerRerender = setCount;
 
-      tapEffect(effect, []); // Empty deps = run once
+      useEffect(effect, []); // Empty deps = run once
       return count;
     });
 
-    renderTest(resource, undefined);
+    renderTest(resource);
     expect(effect).toHaveBeenCalledTimes(1);
 
     // Re-render
     triggerRerender(1);
-    const ctx = renderResourceFiber(resource, undefined);
-    commitResourceFiber(resource, ctx);
+    renderResourceFiber(resource, []);
+    commitResourceFiber(resource);
 
     expect(effect).toHaveBeenCalledTimes(1); // Should not re-run
   });
@@ -135,37 +135,37 @@ describe("Lifecycle - Dependencies", () => {
     let setDep1: any, setDep2: any;
 
     const resource = createTestResource(() => {
-      const [dep1, _setDep1] = tapState("a");
-      const [dep2, _setDep2] = tapState(1);
+      const [dep1, _setDep1] = useState("a");
+      const [dep2, _setDep2] = useState(1);
       setDep1 = _setDep1;
       setDep2 = _setDep2;
 
-      tapEffect(effect, [dep1, dep2]);
+      useEffect(effect, [dep1, dep2]);
       return { dep1, dep2 };
     });
 
     // Initial render
-    let ctx = renderResourceFiber(resource, undefined);
-    commitResourceFiber(resource, ctx);
+    renderResourceFiber(resource, []);
+    commitResourceFiber(resource);
     expect(effect).toHaveBeenCalledTimes(1);
 
     // Change first dep
     setDep1("b");
-    ctx = renderResourceFiber(resource, undefined);
-    commitResourceFiber(resource, ctx);
+    renderResourceFiber(resource, []);
+    commitResourceFiber(resource);
     expect(effect).toHaveBeenCalledTimes(2);
 
     // Change second dep
     setDep2(2);
-    ctx = renderResourceFiber(resource, undefined);
-    commitResourceFiber(resource, ctx);
+    renderResourceFiber(resource, []);
+    commitResourceFiber(resource);
     expect(effect).toHaveBeenCalledTimes(3);
 
     // Change both deps
     setDep1("c");
     setDep2(3);
-    ctx = renderResourceFiber(resource, undefined);
-    commitResourceFiber(resource, ctx);
+    renderResourceFiber(resource, []);
+    commitResourceFiber(resource);
     expect(effect).toHaveBeenCalledTimes(4);
 
     unmountResourceFiber(resource);
@@ -176,20 +176,20 @@ describe("Lifecycle - Dependencies", () => {
     let setObj: any;
 
     const resource = createTestResource(() => {
-      const [obj, _setObj] = tapState({ value: 1 });
+      const [obj, _setObj] = useState({ value: 1 });
       setObj = _setObj;
 
-      tapEffect(effect, [obj]);
+      useEffect(effect, [obj]);
       return obj;
     });
 
-    renderTest(resource, undefined);
+    renderTest(resource);
     expect(effect).toHaveBeenCalledTimes(1);
 
     // Set to new object with same shape
     setObj({ value: 1 });
-    const ctx = renderResourceFiber(resource, undefined);
-    commitResourceFiber(resource, ctx);
+    renderResourceFiber(resource, []);
+    commitResourceFiber(resource);
 
     expect(effect).toHaveBeenCalledTimes(2); // Should re-run (different object)
   });
@@ -199,20 +199,20 @@ describe("Lifecycle - Dependencies", () => {
     let setValue: any;
 
     const resource = createTestResource(() => {
-      const [value, _setValue] = tapState(NaN);
+      const [value, _setValue] = useState(NaN);
       setValue = _setValue;
 
-      tapEffect(effect, [value]);
+      useEffect(effect, [value]);
       return value;
     });
 
-    renderTest(resource, undefined);
+    renderTest(resource);
     expect(effect).toHaveBeenCalledTimes(1);
 
     // Set to NaN again
-    const ctx = renderResourceFiber(resource, undefined);
+    renderResourceFiber(resource, []);
     setValue(NaN);
-    commitResourceFiber(resource, ctx);
+    commitResourceFiber(resource);
 
     expect(effect).toHaveBeenCalledTimes(1); // Should not re-run (NaN === NaN in Object.is)
   });
@@ -222,21 +222,21 @@ describe("Lifecycle - Dependencies", () => {
 
     const resource = createTestResource(() => {
       if (useDeps) {
-        tapEffect(() => {}, [1]);
+        useEffect(() => {}, [1]);
       } else {
-        tapEffect(() => {}); // No deps
+        useEffect(() => {}); // No deps
       }
       return null;
     });
 
-    renderTest(resource, undefined);
+    renderTest(resource);
 
     // Change to no deps
     useDeps = false;
 
-    // Error now throws during render (fail-fast validation)
-    expect(() => renderResourceFiber(resource, undefined)).toThrow(
-      "tapEffect called with and without dependencies across re-renders",
+    // Error throws during render (fail-fast validation)
+    expect(() => renderResourceFiber(resource, [])).toThrow(
+      "useEffect called with and without dependencies across re-renders",
     );
   });
 });

@@ -1,10 +1,11 @@
-import type { ReactNode } from "react";
 import { Pressable, type PressableProps } from "react-native";
-import { useCallback } from "react";
-import { useAui, useAuiState } from "@assistant-ui/store";
+import { useBranchPickerPrevious } from "@assistant-ui/core/react";
 
-export type BranchPickerPreviousProps = Omit<PressableProps, "onPress"> & {
-  children: ReactNode;
+export type BranchPickerPreviousProps = Omit<
+  PressableProps,
+  "onPress" | "children"
+> & {
+  children: PressableProps["children"];
 };
 
 export const BranchPickerPrevious = ({
@@ -12,23 +13,13 @@ export const BranchPickerPrevious = ({
   disabled: disabledProp,
   ...pressableProps
 }: BranchPickerPreviousProps) => {
-  const aui = useAui();
-  const disabled = useAuiState((s) => {
-    if (s.message.branchNumber <= 1) return true;
-    if (s.thread.isRunning && !s.thread.capabilities.switchBranchDuringRun) {
-      return true;
-    }
-    return false;
-  });
-
-  const goToPrevious = useCallback(() => {
-    aui.message().switchToBranch({ position: "previous" });
-  }, [aui]);
+  const { previous, disabled } = useBranchPickerPrevious();
 
   return (
     <Pressable
-      onPress={goToPrevious}
+      onPress={previous}
       disabled={disabledProp ?? disabled}
+      accessibilityRole="button"
       {...pressableProps}
     >
       {children}

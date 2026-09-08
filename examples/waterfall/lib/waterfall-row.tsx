@@ -18,13 +18,14 @@ export function WaterfallRow() {
       <SpanPrimitive.Indent
         baseIndent={8}
         indentPerLevel={12}
-        className="sticky left-0 z-10 flex shrink-0 items-center gap-1 overflow-hidden border-border border-r bg-background px-2 group-hover:bg-accent/50"
+        className="border-border bg-background group-hover:bg-accent/50 sticky left-0 z-10 flex shrink-0 items-center gap-1 overflow-hidden border-r px-2"
         style={{ width: LABEL_WIDTH, height: barHeight }}
       >
         <AuiIf condition={(s) => s.span.hasChildren}>
-          <SpanPrimitive.CollapseToggle className="flex shrink-0 items-center justify-center rounded p-0.5 text-muted-foreground hover:text-foreground">
+          <SpanPrimitive.CollapseToggle className="text-muted-foreground hover:text-foreground flex shrink-0 items-center justify-center rounded p-0.5">
             <svg
-              className="size-3.5 transition-transform data-[collapsed=true]:[-rotate-90]"
+              aria-hidden="true"
+              className="size-3.5 transition-transform group-data-[collapsed=true]:-rotate-90"
               viewBox="0 0 16 16"
               fill="currentColor"
             >
@@ -36,7 +37,7 @@ export function WaterfallRow() {
           <span className="w-4.5 shrink-0" />
         </AuiIf>
         <SpanPrimitive.StatusIndicator className="size-1.5 shrink-0 rounded-full bg-current" />
-        <SpanPrimitive.TypeBadge className="shrink-0 rounded border border-border px-1 text-[10px] text-muted-foreground" />
+        <SpanPrimitive.TypeBadge className="border-border text-muted-foreground shrink-0 rounded border px-1 text-[10px]" />
         <SpanPrimitive.Name className="truncate text-sm" />
       </SpanPrimitive.Indent>
 
@@ -45,7 +46,7 @@ export function WaterfallRow() {
         className="group-hover:bg-accent/30"
         style={{ width: barWidth, height: barHeight }}
       >
-        <svg width={barWidth} height={barHeight}>
+        <svg aria-hidden="true" width={barWidth} height={barHeight}>
           <WaterfallBar />
         </svg>
       </div>

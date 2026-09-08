@@ -31,9 +31,9 @@ type AssistantState = { [K]: ReturnType<ClientSchemas[K]["methods"]["getState"]>
 ### useAui
 ```typescript
 useAui(): AssistantClient;
-useAui(clients: { [K]?: ClientElement<K> | DerivedElement<K> }): AssistantClient;
+useAui(clients: AuiConfig.Input): AssistantClient; // deprecated: use <AuiProvider extends={aui} config>
 ```
-Flow: splitClients → apply transformScopes → mount root clients → create derived accessors → merge with parent.
+Returns the `AssistantClient` from context. The deprecated overload extends it with additional scopes.
 
 ### useAuiState
 ```typescript
@@ -47,18 +47,25 @@ useAuiEvent<E>(selector: E | { scope: EventScope<E>; event: E }, callback: (payl
 ```
 Selectors: `"client.event"` | `{ scope: "parent", event }` | `{ scope: "*", event }`. Wildcard `"*"` receives all.
 
-### AuiProvider / AuiIf
+### AuiConfig / AuiProvider / AuiIf
 ```typescript
-<AuiProvider value={aui}>{children}</AuiProvider>
+AuiConfig(config: { [K]?: ClientElement<K> | DerivedElement<K> }): AuiConfig;
+
+const aui = useAui();
+const config = AuiConfig({ ... });
+
+<AuiProvider config={config}>{children}</AuiProvider>                 // top-level root
+<AuiProvider extends={aui} config={config}>{children}</AuiProvider>   // extend parent
+<AuiProvider extends={null} config={config}>{children}</AuiProvider>  // isolate from parent
 <AuiIf condition={(s) => boolean}>{children}</AuiIf>
 ```
+`config` must be built with `AuiConfig` (branded type) and is identity-insensitive. Under a parent provider, `extends` is mandatory (dev error otherwise); `extends` requires `config`; `extends={client}` with an empty config creates a client extending `client`. Config flow: splitClients → apply transformScopes → mount root clients → create derived accessors → merge with parent.
 
 ### Derived
 ```typescript
 Derived<K>({ source, query, get: (client) => methods });
-Derived<K>({ getMeta: (client) => { source, query }, get });
 ```
-Returns marker element. `get` uses `tapEffectEvent` - always calls latest closure.
+Returns marker element. Meta (`source`, `query`) keys the derived scope's resource fiber — a different meta yields a new client function in the same render pass, so consumers see the new derivation immediately rather than after the next commit.
 
 ### attachTransformScopes
 ```typescript
@@ -66,30 +73,30 @@ attachTransformScopes(resource, (scopes, parent) => newScopes): void;
 ```
 Attaches a function that receives the current scopes config and the parent `AssistantClient`, and returns a new scopes config. The transform can inspect `parent[key].source` to check whether a scope exists in parent context (`null` = not provided). Transforms are collected from root elements and run iteratively (new root elements added by transforms are also processed). Single transform per resource; throws on duplicate attach.
 
-### tapAssistantClientRef / tapAssistantEmit
+### useAssistantClientRef / useAssistantEmit
 ```typescript
-tapAssistantClientRef(): { current: AssistantClient };
-tapAssistantEmit(): <E>(event: E, payload) => void;  // Stable via tapEffectEvent
+useAssistantClientRef(): { current: AssistantClient };
+useAssistantEmit(): <E>(event: E, payload) => void;  // Stable via useEffectEvent
 ```
 
-### tapClientResource
+### useClientResource
 ```typescript
-tapClientResource(element: ResourceElement<TMethods>): { state: InferClientState<TMethods>; methods: TMethods; key: string | number | undefined };
+useClientResource(element: ResourceElement<TMethods>): { state: InferClientState<TMethods>; methods: TMethods; key: string | number | undefined };
 ```
 Wraps resource element to create stable client proxy. Adds client to stack for event scoping. Use for 1:1 client mappings. State is inferred from the `getState()` method if present.
 
-### tapClientLookup
+### useClientLookup
 ```typescript
-tapClientLookup<TMethods extends ClientMethods>(
+useClientLookup<TMethods extends ClientMethods>(
   getElements: () => readonly ResourceElement<TMethods>[],
   getElementsDeps: readonly unknown[]
 ): { state: InferClientState<TMethods>[]; get: (lookup: { index: number } | { key: string }) => TMethods };
 ```
-Wraps each element with `tapClientResource`. Throws on lookup miss.
+Wraps each element with `useClientResource`. Throws on lookup miss.
 
-### tapClientList
+### useClientList
 ```typescript
-tapClientList<TData, TMethods extends ClientMethods>({
+useClientList<TData, TMethods extends ClientMethods>({
   initialValues: TData[];
   getKey: (data: TData) => string;
   resource: ContravariantResource<TMethods, ResourceProps<TData>>;
@@ -97,7 +104,7 @@ tapClientList<TData, TMethods extends ClientMethods>({
 
 type ResourceProps<TData> = { key: string; getInitialData: () => TData; remove: () => void };
 ```
-Wraps tapClientLookup. `getInitialData` may only be called once. Throws on duplicate key add.
+Wraps useClientLookup. `getInitialData` may only be called once. Throws on duplicate key add.
 
 ## Events
 
@@ -106,13 +113,13 @@ type AssistantEventName = keyof ClientEventMap | "*";
 type AssistantEventScope<E> = "*" | EventSource<E> | AncestorsOf<EventSource<E>>;
 type AssistantEventSelector<E> = E | { scope: Scope<E>; event: E };
 ```
-Flow: `tapAssistantEmit` captures client stack → `emit` queues via microtask → NotificationManager notifies → scope filtering.
+Flow: `useAssistantEmit` captures client stack → `emit` queues via microtask → NotificationManager notifies → scope filtering.
 
 ## Implementation
 
 | Component | Behavior |
 |-----------|----------|
-| **tapClientResource** | Mounts element → stable proxy via `tapMemo` → delegates to ref → `SYMBOL_GET_OUTPUT` for internal access |
+| **useClientResource** | Mounts element → stable proxy via `useMemo` → delegates to ref → `SYMBOL_GET_OUTPUT` for internal access |
 | **ProxiedState** | Proxy intercepts `state.foo` → `aui.foo()` → `SYMBOL_GET_OUTPUT` |
 | **Client Stack** | Context stack per level. Emit captures stack. Listeners filter by matching stack |
 | **NotificationManager** | Handles events (`on`/`emit`) and state subscriptions (`subscribe`/`notifySubscribers`) |
@@ -123,7 +130,7 @@ Flow: `tapAssistantEmit` captures client stack → `emit` queues via microtask �
 | Audience | API Surface |
 |----------|-------------|
 | Users | `useAui`, `useAuiState`, `useAuiEvent`, `AuiProvider`, `AuiIf`, `Derived` |
-| Authors | Above + `tap*`, `attachTransformScopes`, `ClientOutput`, `ScopeRegistry` |
+| Authors | Above + `use*`, `attachTransformScopes`, `ClientOutput`, `ScopeRegistry` |
 | Internal | `utils/*` |
 
 **Terminology**: Client (React Query pattern), methods (not actions), meta (optional source/query), events (optional).

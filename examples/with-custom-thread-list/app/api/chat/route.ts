@@ -1,7 +1,7 @@
 import { openai } from "@ai-sdk/openai";
 import {
   streamText,
-  UIMessage,
+  type UIMessage,
   convertToModelMessages,
   tool,
   stepCountIs,
@@ -16,7 +16,7 @@ export async function POST(req: Request) {
   const { messages }: { messages: UIMessage[] } = await req.json();
 
   const result = streamText({
-    model: openai("gpt-4o"),
+    model: openai("gpt-5.6-luna"),
     messages: await convertToModelMessages(messages),
     stopWhen: stepCountIs(10),
     tools: {

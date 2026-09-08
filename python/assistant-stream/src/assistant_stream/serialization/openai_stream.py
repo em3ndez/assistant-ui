@@ -1,20 +1,20 @@
 from assistant_stream.assistant_stream_chunk import AssistantStreamChunk
+from assistant_stream.identifiers import generate_prefixed_id
 import json
 import time
-import string
-import random
 from typing import AsyncGenerator
 from assistant_stream.serialization.assistant_stream_response import (
     AssistantStreamResponse,
+)
+from assistant_stream.serialization.heartbeat import (
+    SSE_HEARTBEAT_LINE,
+    HeartbeatOption,
 )
 from assistant_stream.serialization.stream_encoder import StreamEncoder
 
 
 def generate_openai_style_id():
-    prefix = "chatcmpl-"
-    characters = string.ascii_letters + string.digits
-    random_id = "".join(random.choices(characters, k=24))
-    return prefix + random_id
+    return generate_prefixed_id("chatcmpl-")
 
 
 class OpenAIStreamEncoder(StreamEncoder):
@@ -26,6 +26,9 @@ class OpenAIStreamEncoder(StreamEncoder):
 
     def get_media_type(self) -> str:
         return "text/event-stream"
+
+    def get_keepalive_token(self) -> str:
+        return SSE_HEARTBEAT_LINE
 
     def _create_chunk(self, delta={}, finish_reason=None):
         response = {
@@ -75,8 +78,9 @@ class OpenAIStreamResponse(AssistantStreamResponse):
     def __init__(
         self,
         stream: AsyncGenerator[AssistantStreamChunk, None],
+        heartbeat: HeartbeatOption = True,
     ):
         """
         Initializes the response with the OpenAI SSE encoder.
         """
-        super().__init__(stream, OpenAIStreamEncoder())
+        super().__init__(stream, OpenAIStreamEncoder(), heartbeat=heartbeat)

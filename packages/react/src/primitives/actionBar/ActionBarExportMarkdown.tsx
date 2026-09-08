@@ -1,9 +1,9 @@
 "use client";
 
 import { forwardRef, useCallback } from "react";
-import { ActionButtonProps } from "../../utils/createActionButton";
-import { composeEventHandlers } from "@radix-ui/primitive";
-import { Primitive } from "@radix-ui/react-primitive";
+import type { ActionButtonProps } from "../../utils/createActionButton";
+import { composeEventHandlers } from "radix-ui/internal";
+import { Primitive } from "../../utils/Primitive";
 import { useAuiState, useAui } from "@assistant-ui/store";
 
 const useActionBarExportMarkdown = ({
@@ -23,7 +23,7 @@ const useActionBarExportMarkdown = ({
   });
 
   const callback = useCallback(async () => {
-    const content = aui.message().getCopyText();
+    const content = aui.message.getCopyText();
     if (!content) return;
 
     if (onExport) {
@@ -37,7 +37,7 @@ const useActionBarExportMarkdown = ({
     a.href = url;
     a.download = filename ?? `message-${Date.now()}.md`;
     a.click();
-    URL.revokeObjectURL(url);
+    setTimeout(() => URL.revokeObjectURL(url), 40_000);
   }, [aui, filename, onExport]);
 
   if (!hasExportableContent) return null;
@@ -61,7 +61,9 @@ export const ActionBarPrimitiveExportMarkdown = forwardRef<
       ref={forwardedRef}
       disabled={disabled || !callback}
       onClick={composeEventHandlers(onClick, () => {
-        callback?.();
+        void callback?.().catch((error: unknown) => {
+          console.error("[assistant-ui] markdown export failed:", error);
+        });
       })}
     />
   );

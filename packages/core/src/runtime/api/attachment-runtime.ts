@@ -1,4 +1,5 @@
-import type { Attachment, CompleteAttachment, Unsubscribe } from "../../types";
+import type { Attachment, CompleteAttachment } from "../../types/attachment";
+import type { Unsubscribe } from "../../types/unsubscribe";
 import type { SubscribableWithState } from "../../subscribable/subscribable";
 
 import type { ComposerRuntimeCoreBinding } from "./bindings";
@@ -41,15 +42,17 @@ export type AttachmentRuntime<
 
 export abstract class AttachmentRuntimeImpl<
   Source extends AttachmentRuntimeSource = AttachmentRuntimeSource,
-> implements AttachmentRuntime
-{
+> implements AttachmentRuntime {
   public get path() {
     return this._core.path;
   }
 
   public abstract get source(): Source;
 
-  constructor(private _core: AttachmentSnapshotBinding<Source>) {
+  private _core: AttachmentSnapshotBinding<Source>;
+
+  constructor(_core: AttachmentSnapshotBinding<Source>) {
+    this._core = _core;
     this.__internal_bindMethods();
   }
 
@@ -73,11 +76,14 @@ export abstract class AttachmentRuntimeImpl<
 abstract class ComposerAttachmentRuntime<
   Source extends "thread-composer" | "edit-composer",
 > extends AttachmentRuntimeImpl<Source> {
+  private _composerApi: ComposerRuntimeCoreBinding;
+
   constructor(
     core: AttachmentSnapshotBinding<Source>,
-    private _composerApi: ComposerRuntimeCoreBinding,
+    _composerApi: ComposerRuntimeCoreBinding,
   ) {
     super(core);
+    this._composerApi = _composerApi;
   }
 
   public remove() {
@@ -102,10 +108,6 @@ export class EditComposerAttachmentRuntimeImpl extends ComposerAttachmentRuntime
 export class MessageAttachmentRuntimeImpl extends AttachmentRuntimeImpl<"message"> {
   public get source(): "message" {
     return "message";
-  }
-
-  constructor(core: AttachmentSnapshotBinding<"message">) {
-    super(core);
   }
 
   public remove(): never {

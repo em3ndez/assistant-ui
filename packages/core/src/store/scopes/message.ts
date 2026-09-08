@@ -1,9 +1,7 @@
-import type { ThreadMessage, RunConfig } from "../../types";
-import type {
-  SpeechState,
-  SubmittedFeedback,
-  MessageRuntime,
-} from "../../runtime";
+import type { ThreadMessage } from "../../types/message";
+import type { RunConfig } from "../../types/message";
+import type { SpeechState } from "../../runtime/interfaces/thread-runtime-core";
+import type { MessageRuntime } from "../../runtime/api/message-runtime";
 import type { ComposerMethods, ComposerState } from "./composer";
 import type { PartMethods, PartState } from "./part";
 import type { AttachmentMethods } from "./attachment";
@@ -21,7 +19,7 @@ export type MessageState = ThreadMessage & {
    * @example
    * ```ts
    * import { WebSpeechSynthesisAdapter } from "@assistant-ui/react";
-   * import { useChatRuntime } from "@assistant-ui/react-ai-sdk";
+   * import { useChatRuntime } from "@assistant-ui/ai-sdk";
    *
    * const runtime = useChatRuntime({
    *   adapters: {
@@ -30,8 +28,6 @@ export type MessageState = ThreadMessage & {
    * });
    */
   readonly speech: SpeechState | undefined;
-  /** @deprecated Use `message.metadata.submittedFeedback` instead. This will be removed in 0.12.0. */
-  readonly submittedFeedback: SubmittedFeedback | undefined;
   readonly composer: ComposerState;
   readonly parts: readonly PartState[];
   readonly isCopied: boolean;
@@ -46,6 +42,7 @@ export type MessageMethods = {
    */
   getState(): MessageState;
   composer(): ComposerMethods;
+  delete(): void | Promise<void>;
   reload(config?: { runConfig?: RunConfig }): void;
   /** @deprecated This API is still under active development and might change without notice. */
   speak(): void;

@@ -1,5 +1,192 @@
 # @assistant-ui/react-markdown
 
+## 0.14.14
+
+### Patch Changes
+
+- [#6732](https://github.com/assistant-ui/assistant-ui/pull/6732) [`8c33c29`](https://github.com/assistant-ui/assistant-ui/commit/8c33c29b87b16af91d4eb0c7804a8e03c70f6d59) - fix: stop bracket-delimited math from swallowing the rest of the message ([@okisdev](https://github.com/okisdev))
+
+- [#6732](https://github.com/assistant-ui/assistant-ui/pull/6732) [`8c33c29`](https://github.com/assistant-ui/assistant-ui/commit/8c33c29b87b16af91d4eb0c7804a8e03c70f6d59) - fix: keep code spans and fences inert when normalizing math delimiters ([@okisdev](https://github.com/okisdev))
+
+- [#6732](https://github.com/assistant-ui/assistant-ui/pull/6732) [`8c33c29`](https://github.com/assistant-ui/assistant-ui/commit/8c33c29b87b16af91d4eb0c7804a8e03c70f6d59) - fix: stop charging every streamed token a second render pass when `defer` is off ([@okisdev](https://github.com/okisdev))
+
+## 0.14.13
+
+### Patch Changes
+
+- [#6214](https://github.com/assistant-ui/assistant-ui/pull/6214) [`6dcd69f`](https://github.com/assistant-ui/assistant-ui/commit/6dcd69f8f743b156e4733dcc2d4819c6f7891804) - fix: compare componentsByLanguage structurally so inline objects keep code-block memoization ([@Kinfe123](https://github.com/Kinfe123))
+
+- [#6212](https://github.com/assistant-ui/assistant-ui/pull/6212) [`0fa835c`](https://github.com/assistant-ui/assistant-ui/commit/0fa835cf4abc38eddcb2e6fa998a8c14b3299f50) - fix: keep the pre element for raw pre blocks without a code child ([@Kinfe123](https://github.com/Kinfe123))
+
+- [#6305](https://github.com/assistant-ui/assistant-ui/pull/6305) [`e96d3de`](https://github.com/assistant-ui/assistant-ui/commit/e96d3dea9370159e04f82bf4eb39d6b1b1c4d21d) - chore: update dependencies ([@okisdev](https://github.com/okisdev))
+
+- [#6449](https://github.com/assistant-ui/assistant-ui/pull/6449) [`e818d4a`](https://github.com/assistant-ui/assistant-ui/commit/e818d4a8e84d671172545cc03048a3c4f5c9cd64) - refactor: single-source the code-fence contract on a react-markdown subpath. the CodeHeader/SyntaxHighlighter prop types, the by-language override entry, and the language-class parser now live in @assistant-ui/react-markdown/code-fence; react-streamdown re-exports the types from there instead of keeping structurally compatible copies. @types/hast moves to dependencies in both packages so the published declarations reference hast by name instead of a broken store-relative path. ([@okisdev](https://github.com/okisdev))
+
+## 0.14.12
+
+### Patch Changes
+
+- [#6160](https://github.com/assistant-ui/assistant-ui/pull/6160) [`235fa59`](https://github.com/assistant-ui/assistant-ui/commit/235fa598a99f33170bb1e69c99c96fdb2bd643fc) - fix: preserve currency inside one- and two-backtick code spans that contain longer backtick runs ([@okisdev](https://github.com/okisdev))
+
+## 0.14.11
+
+### Patch Changes
+
+- [#5674](https://github.com/assistant-ui/assistant-ui/pull/5674) [`3461ab3`](https://github.com/assistant-ui/assistant-ui/commit/3461ab3a81285c3142a83b5c9fa5fcb61abb3333) - fix: pass the raw fence language to custom highlighters instead of "unknown" ([@ShobhitPatra](https://github.com/ShobhitPatra))
+
+## 0.14.10
+
+### Patch Changes
+
+- [#5723](https://github.com/assistant-ui/assistant-ui/pull/5723) [`94dc3e5`](https://github.com/assistant-ui/assistant-ui/commit/94dc3e509fa2b4fae1a14c88ec34b910c8d95af8) - chore: update dependencies ([@okisdev](https://github.com/okisdev))
+
+## 0.14.9
+
+### Patch Changes
+
+- [#5673](https://github.com/assistant-ui/assistant-ui/pull/5673) [`db419ca`](https://github.com/assistant-ui/assistant-ui/commit/db419ca2d8fe24e63e668c78ede5cf1c6791208d) - fix: extract full fence language for ids with non-word characters (c++, objective-c, f#) ([@ShobhitPatra](https://github.com/ShobhitPatra))
+
+## 0.14.8
+
+### Patch Changes
+
+- Updated dependencies [[`9a7e776`](https://github.com/assistant-ui/assistant-ui/commit/9a7e77603d59b5e091ee922e2e087f0101679321), [`2f5d0d4`](https://github.com/assistant-ui/assistant-ui/commit/2f5d0d441caf6a152bf4eef13566a2f9a161541c)]:
+  - @assistant-ui/react@0.15.0
+
+## 0.14.7
+
+### Patch Changes
+
+- [#5160](https://github.com/assistant-ui/assistant-ui/pull/5160) [`1999b21`](https://github.com/assistant-ui/assistant-ui/commit/1999b218dfcab245f14549ca7d39f6756f51ee6b) - fix: keep inline math that opens with a digit out of currency escaping ([@SiKreuz](https://github.com/SiKreuz))
+
+- [#5079](https://github.com/assistant-ui/assistant-ui/pull/5079) [`390e417`](https://github.com/assistant-ui/assistant-ui/commit/390e4177ca47f7ece839613ad0f076add9313328) - chore: update dependencies ([@Yonom](https://github.com/Yonom))
+
+## 0.14.6
+
+### Patch Changes
+
+- [#4746](https://github.com/assistant-ui/assistant-ui/pull/4746) [`0686f4e`](https://github.com/assistant-ui/assistant-ui/commit/0686f4e6b8ee5f6e17c968997ef11622ef8f9c98) - chore: update dependencies ([@Yonom](https://github.com/Yonom))
+
+- [#4887](https://github.com/assistant-ui/assistant-ui/pull/4887) [`d03e5cf`](https://github.com/assistant-ui/assistant-ui/commit/d03e5cf0e6efada832503fedc565a1fb8f14676a) - chore: update dependencies ([@Yonom](https://github.com/Yonom))
+
+- [#4815](https://github.com/assistant-ui/assistant-ui/pull/4815) [`5325f09`](https://github.com/assistant-ui/assistant-ui/commit/5325f0985768b750b050cf07f592fdfed34eccac) - chore: update dependencies ([@okisdev](https://github.com/okisdev))
+
+## 0.14.5
+
+### Patch Changes
+
+- [#4517](https://github.com/assistant-ui/assistant-ui/pull/4517) [`cefcf27`](https://github.com/assistant-ui/assistant-ui/commit/cefcf27b4b53ceafef18e469644d51797c11c8ff) - chore: update dependencies ([@okisdev](https://github.com/okisdev))
+
+## 0.14.4
+
+### Patch Changes
+
+- [#4408](https://github.com/assistant-ui/assistant-ui/pull/4408) [`b6016d1`](https://github.com/assistant-ui/assistant-ui/commit/b6016d1d3dd98ee9c3d3e7ee6ff1fa818a225abb) - feat: export math-delimiter preprocess helpers for the markdown text primitives ([@okisdev](https://github.com/okisdev))
+
+  adds `normalizeMathDelimiters`, `rewriteLatexBracketDelimiters`, `rewriteCustomMathTags`, and `escapeCurrencyDollars` so you can pass them to the `preprocess` prop instead of copy-pasting a regex blob. they rewrite the `\(...\)` / `\[...\]` brackets and `[/math]` / `[/inline]` tags that models emit to the `$...$` / `$$...$$` form remark-math parses, and escape `$5`-style currency so single-dollar math doesn't eat it.
+
+## 0.14.3
+
+### Patch Changes
+
+- [#4348](https://github.com/assistant-ui/assistant-ui/pull/4348) [`5ca6558`](https://github.com/assistant-ui/assistant-ui/commit/5ca655858351dc7ad852ef4bc8292aa74d90e174) - feat: opt-in `defer` prop on the markdown text primitives ([@okisdev](https://github.com/okisdev))
+
+  `StreamdownTextPrimitive` and `MarkdownTextPrimitive` accept a `defer` flag that routes the streamed text through `useDeferredValue`, so re-parsing the growing message runs at a lower priority and typing/scrolling stay responsive while a long message streams in. intermediate streaming states may be skipped under load; the final text always renders. default off; the shadcn kit's markdown-text turns it on.
+
+- [#4350](https://github.com/assistant-ui/assistant-ui/pull/4350) [`42fd04f`](https://github.com/assistant-ui/assistant-ui/commit/42fd04f0b1012a1bee153a50639f1286ca9a4fbe) - feat: public, tunable `useSmooth` ([@okisdev](https://github.com/okisdev))
+
+  `useSmooth` and a new `SmoothOptions` type are now exported from `@assistant-ui/react` (previously internal-only with a hard-coded reveal rate). the `smooth` prop on `MessagePartPrimitive.Text` and `MarkdownTextPrimitive` widens to `boolean | SmoothOptions`, with `drainMs` (backlog drain target, default 250), `maxCharIntervalMs` (slowest reveal interval, default 5), and `maxCharsPerFrame` (per-frame cap, default unlimited). the hook also now preserves the part type for reasoning parts instead of always returning `type: "text"`. react-markdown's `@assistant-ui/react` peer floor moves to the release that ships `SmoothOptions`.
+
+## 0.14.2
+
+### Patch Changes
+
+- [#4306](https://github.com/assistant-ui/assistant-ui/pull/4306) [`15878d8`](https://github.com/assistant-ui/assistant-ui/commit/15878d8114edbbb82c2a467cf811478e5f4e08bc) - chore: update dependencies ([@Yonom](https://github.com/Yonom))
+
+## 0.14.1
+
+### Patch Changes
+
+- [#4085](https://github.com/assistant-ui/assistant-ui/pull/4085) [`01244a5`](https://github.com/assistant-ui/assistant-ui/commit/01244a56026ee92bd4e49cb985136f9eb6d45154) - chore: update dependencies ([@Yonom](https://github.com/Yonom))
+
+- Updated dependencies [[`b02b701`](https://github.com/assistant-ui/assistant-ui/commit/b02b7012cff158b4e73b82503b9ea90638b7398d), [`0a0c306`](https://github.com/assistant-ui/assistant-ui/commit/0a0c306286598ea885b046a1dfb85016f720051c), [`01244a5`](https://github.com/assistant-ui/assistant-ui/commit/01244a56026ee92bd4e49cb985136f9eb6d45154), [`f2ec01c`](https://github.com/assistant-ui/assistant-ui/commit/f2ec01ce0f01317a8444b779d88f9b6a26d691c5)]:
+  - @assistant-ui/react@0.14.8
+
+## 0.14.0
+
+### Patch Changes
+
+- Updated dependencies [[`040d469`](https://github.com/assistant-ui/assistant-ui/commit/040d469acfcf782de6fc188c646dfd8732d27088)]:
+  - @assistant-ui/react@0.14.0
+
+## 0.13.0
+
+### Patch Changes
+
+- Updated dependencies [[`801b9a6`](https://github.com/assistant-ui/assistant-ui/commit/801b9a68d9c7c70ab15ca53842d0df6adacb7b86), [`7098bab`](https://github.com/assistant-ui/assistant-ui/commit/7098bab4c67fbd507c3fad746ef130daa01b3fd6), [`aa6e071`](https://github.com/assistant-ui/assistant-ui/commit/aa6e071fdd6ea832c5aff3f6cf817b2e3eb6ceb0), [`b090acb`](https://github.com/assistant-ui/assistant-ui/commit/b090acb98f6bf3579aab4efedddaff83a0b54c94), [`df7eb3e`](https://github.com/assistant-ui/assistant-ui/commit/df7eb3eee6beeac72d3220707cf4660adf932586), [`f4a693e`](https://github.com/assistant-ui/assistant-ui/commit/f4a693ec1898f6ed0b81be47512fe51fd93a2de8), [`d864d07`](https://github.com/assistant-ui/assistant-ui/commit/d864d0709d9db5f8e042e62cf1f40669f087ba68)]:
+  - @assistant-ui/react@0.13.0
+
+## 0.12.11
+
+### Patch Changes
+
+- [#3876](https://github.com/assistant-ui/assistant-ui/pull/3876) [`ce865bc`](https://github.com/assistant-ui/assistant-ui/commit/ce865bc46af996d53f89e18068139d4d38546ca6) - chore: update dependencies ([@Yonom](https://github.com/Yonom))
+
+- Updated dependencies [[`ce865bc`](https://github.com/assistant-ui/assistant-ui/commit/ce865bc46af996d53f89e18068139d4d38546ca6), [`c56f98f`](https://github.com/assistant-ui/assistant-ui/commit/c56f98f5759e710281fc57b343b41af102914f1a), [`9aa5410`](https://github.com/assistant-ui/assistant-ui/commit/9aa54107fc76509830309bb5e2c74984408b97fe), [`a1f84ae`](https://github.com/assistant-ui/assistant-ui/commit/a1f84ae7b7782be19a25369905171de997f327ac), [`b4fde97`](https://github.com/assistant-ui/assistant-ui/commit/b4fde97355b51ed7a35401eeed0e5f5943a51150), [`d53ff4f`](https://github.com/assistant-ui/assistant-ui/commit/d53ff4f3f8b7d7220c1cb274c4fda335598fb063), [`17958c9`](https://github.com/assistant-ui/assistant-ui/commit/17958c9234ccc42394260125df54d897c06a47fd), [`477fa8a`](https://github.com/assistant-ui/assistant-ui/commit/477fa8a4c94d8922f5639dac8888fc55926f36cd)]:
+  - @assistant-ui/react@0.12.26
+
+## 0.12.10
+
+### Patch Changes
+
+- 1083599: fix: add "style" export condition for CSS entries so Tailwind CSS v4 `@import` can resolve packages
+
+## 0.12.9
+
+### Patch Changes
+
+- c988db8: chore: update dependencies
+- Updated dependencies [c988db8]
+  - @assistant-ui/react@0.12.25
+
+## 0.12.8
+
+### Patch Changes
+
+- bdce66f: chore: update dependencies
+- 209ae81: chore: remove aui-source export condition from package.json exports
+- Updated dependencies [6554892]
+- Updated dependencies [d726499]
+- Updated dependencies [876f75d]
+- Updated dependencies [bdce66f]
+- Updated dependencies [c362685]
+- Updated dependencies [4abb898]
+- Updated dependencies [209ae81]
+- Updated dependencies [50b3100]
+- Updated dependencies [af70d7f]
+  - @assistant-ui/react@0.12.22
+
+## 0.12.7
+
+### Patch Changes
+
+- 52403c3: chore: update dependencies
+- Updated dependencies [3227e71]
+- Updated dependencies [52403c3]
+  - @assistant-ui/react@0.12.21
+
+## 0.12.6
+
+### Patch Changes
+
+- 349f3c7: chore: update deps
+- Updated dependencies [1ed9867]
+- Updated dependencies [427ffaa]
+- Updated dependencies [349f3c7]
+- Updated dependencies [02614aa]
+- Updated dependencies [642bcda]
+  - @assistant-ui/react@0.12.18
+
 ## 0.12.5
 
 ### Patch Changes

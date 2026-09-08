@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
-import { tapEffect } from "../../hooks/tap-effect";
-import { tapState } from "../../hooks/tap-state";
+import { useEffect } from "../../react-hooks/useEffect";
+import { useState } from "../../react-hooks/useState";
 import { createTestResource, renderTest, unmountResource } from "../test-utils";
 import {
   renderResourceFiber,
@@ -13,11 +13,11 @@ describe("Lifecycle - Mount/Unmount", () => {
     const effects = [vi.fn(), vi.fn(), vi.fn()];
 
     const resource = createTestResource(() => {
-      effects.forEach((fn) => tapEffect(fn));
+      effects.forEach((fn) => useEffect(fn));
       return null;
     });
 
-    renderTest(resource, undefined);
+    renderTest(resource);
 
     effects.forEach((fn) => {
       expect(fn).toHaveBeenCalledTimes(1);
@@ -29,12 +29,12 @@ describe("Lifecycle - Mount/Unmount", () => {
 
     const resource = createTestResource(() => {
       cleanups.forEach((cleanup) => {
-        tapEffect(() => cleanup);
+        useEffect(() => cleanup);
       });
       return null;
     });
 
-    renderTest(resource, undefined);
+    renderTest(resource);
     cleanups.forEach((fn) => expect(fn).not.toHaveBeenCalled());
 
     unmountResource(resource);
@@ -45,13 +45,13 @@ describe("Lifecycle - Mount/Unmount", () => {
     const order: number[] = [];
 
     const resource = createTestResource(() => {
-      tapEffect(() => () => order.push(1));
-      tapEffect(() => () => order.push(2));
-      tapEffect(() => () => order.push(3));
+      useEffect(() => () => order.push(1));
+      useEffect(() => () => order.push(2));
+      useEffect(() => () => order.push(3));
       return null;
     });
 
-    renderTest(resource, undefined);
+    renderTest(resource);
     unmountResource(resource);
 
     expect(order).toEqual([1, 2, 3]);
@@ -64,11 +64,11 @@ describe("Lifecycle - Mount/Unmount", () => {
 
     const resource = createTestResource((props: number) => {
       renderCount++;
-      const [state, _setState] = tapState({ count: 0 });
+      const [state, _setState] = useState({ count: 0 });
       setState = _setState;
 
       // Simple effect that tracks runs
-      tapEffect(() => {
+      useEffect(() => {
         effectRunCount++;
       });
 
@@ -100,18 +100,18 @@ describe("Lifecycle - Mount/Unmount", () => {
     const log: string[] = [];
 
     const resource = createTestResource(() => {
-      const [mounted, setMounted] = tapState(false);
+      const [mounted, setMounted] = useState(false);
 
       log.push("render");
 
-      tapEffect(() => {
+      useEffect(() => {
         log.push("effect-1");
         setMounted(true);
 
         return () => log.push("cleanup-1");
       });
 
-      tapEffect(() => {
+      useEffect(() => {
         log.push("effect-2");
         return () => log.push("cleanup-2");
       });
@@ -120,18 +120,17 @@ describe("Lifecycle - Mount/Unmount", () => {
     });
 
     // Initial render
-    const ctx = renderResourceFiber(resource, undefined);
+    renderResourceFiber(resource, []);
     expect(log).toEqual(["render"]);
 
     // Commit - effects will run
-    commitResourceFiber(resource, ctx);
+    commitResourceFiber(resource);
     // After commit: initial render + effects
     expect(log).toEqual(["render", "effect-1", "effect-2"]);
 
-    // The setState in effect schedules a re-render
-    // With the new architecture, we need to manually trigger it
-    const ctx2 = renderResourceFiber(resource, undefined);
-    commitResourceFiber(resource, ctx2);
+    // The setState in effect schedules a re-render; trigger it manually
+    renderResourceFiber(resource, []);
+    commitResourceFiber(resource);
 
     // Now we should see the re-render and cleanup/re-run of effects
     expect(log).toEqual([
@@ -139,10 +138,10 @@ describe("Lifecycle - Mount/Unmount", () => {
       "effect-1",
       "effect-2",
       "render", // Re-render triggered by setMounted(true)
-      "cleanup-1", // Cleanup from first render
-      "effect-1", // Effect from re-render
-      "cleanup-2", // Cleanup from first render
-      "effect-2", // Effect from re-render
+      "cleanup-1", // Cleanups from first render run first, like React
+      "cleanup-2",
+      "effect-1", // Then the re-render's effects
+      "effect-2",
     ]);
 
     // Clear log for unmount testing
@@ -158,14 +157,14 @@ describe("Lifecycle - Mount/Unmount", () => {
     const goodCleanup = vi.fn();
 
     const resource = createTestResource(() => {
-      tapEffect(() => () => {
+      useEffect(() => () => {
         throw error;
       });
-      tapEffect(() => goodCleanup);
+      useEffect(() => goodCleanup);
       return null;
     });
 
-    renderTest(resource, undefined);
+    renderTest(resource);
 
     // Unmount should throw the error
     expect(() => unmountResource(resource)).toThrow(error);
@@ -178,12 +177,12 @@ describe("Lifecycle - Mount/Unmount", () => {
 
     const resource = createTestResource(() => {
       if (!skipEffect) {
-        tapEffect(() => cleanup);
+        useEffect(() => cleanup);
       }
       return null;
     });
 
-    renderTest(resource, undefined);
+    renderTest(resource);
     unmountResource(resource);
 
     expect(cleanup).not.toHaveBeenCalled();
@@ -194,18 +193,53 @@ describe("Lifecycle - Mount/Unmount", () => {
     const cleanup = vi.fn();
 
     const resource = createTestResource(() => {
-      tapEffect(() => {
+      useEffect(() => {
         effect();
         return cleanup;
       });
       return null;
     });
 
-    const ctx = renderResourceFiber(resource, undefined);
-    commitResourceFiber(resource, ctx);
+    renderResourceFiber(resource, []);
+    commitResourceFiber(resource);
     unmountResourceFiber(resource);
 
     expect(effect).toHaveBeenCalledTimes(1);
     expect(cleanup).toHaveBeenCalledTimes(1);
+  });
+
+  it("reconnects effects that bailed in a render committed after an unmount", () => {
+    const events: string[] = [];
+
+    const resource = createTestResource((dep: number) => {
+      useEffect(() => {
+        events.push("stable:setup");
+        return () => events.push("stable:cleanup");
+      }, []);
+      useEffect(() => {
+        events.push(`dep:setup:${dep}`);
+        return () => events.push("dep:cleanup");
+      }, [dep]);
+      return null;
+    });
+
+    renderResourceFiber(resource, [0]);
+    commitResourceFiber(resource);
+    expect(events).toEqual(["stable:setup", "dep:setup:0"]);
+
+    renderResourceFiber(resource, [1]);
+    unmountResourceFiber(resource);
+    expect(events).toEqual([
+      "stable:setup",
+      "dep:setup:0",
+      "stable:cleanup",
+      "dep:cleanup",
+    ]);
+
+    events.length = 0;
+    commitResourceFiber(resource);
+    expect(events).toEqual(["stable:setup", "dep:setup:1"]);
+
+    unmountResourceFiber(resource);
   });
 });

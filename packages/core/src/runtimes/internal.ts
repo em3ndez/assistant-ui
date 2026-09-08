@@ -17,6 +17,9 @@ export {
 export { ThreadMessageConverter } from "./external-store/thread-message-converter";
 export type { ConverterCallback } from "./external-store/thread-message-converter";
 
+// Readonly Runtime
+export { ReadonlyThreadRuntimeCore } from "./readonly/ReadonlyThreadRuntimeCore";
+
 // Remote Thread List
 export { OptimisticState } from "./remote-thread-list/optimistic-state";
 export { EMPTY_THREAD_CORE } from "./remote-thread-list/empty-thread-core";
@@ -28,9 +31,13 @@ export type {
 export {
   createThreadMappingId,
   getThreadData,
+  promoteNewThreadReducer,
   updateStatusReducer,
 } from "./remote-thread-list/remote-thread-state";
 export type {
   RemoteThreadInitializeResponse,
   RemoteThreadListOptions,
 } from "./remote-thread-list/types";
+
+// Tool Invocations
+export { ToolInvocationTracker } from "./tool-invocations/ToolInvocationTracker";

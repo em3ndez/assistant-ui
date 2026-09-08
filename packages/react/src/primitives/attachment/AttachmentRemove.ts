@@ -1,8 +1,8 @@
 "use client";
 
 import {
-  ActionButtonElement,
-  ActionButtonProps,
+  type ActionButtonElement,
+  type ActionButtonProps,
   createActionButton,
 } from "../../utils/createActionButton";
 import { useCallback } from "react";
@@ -12,7 +12,7 @@ const useAttachmentRemove = () => {
   const aui = useAui();
 
   const handleRemoveAttachment = useCallback(() => {
-    aui.attachment().remove();
+    aui.attachment.remove();
   }, [aui]);
 
   return handleRemoveAttachment;

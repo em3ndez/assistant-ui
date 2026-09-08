@@ -10,9 +10,21 @@
     "esModuleInterop": true,
     "declaration": true,
     "noEmit": true,
-    "baseUrl": ".",
+    "typeRoots": [
+      "./node_modules/@types",
+      "../../node_modules/@types",
+      "./node_modules/@assistant-ui/x-buildutils/types"
+    ],
+    "types": ["browser-process"],
     "paths": {
       "@assistant-ui/ui/*": ["./src/*"],
+      "@/components/assistant-ui/*": ["./src/components/react/assistant-ui/*"],
+      "@/components/icons/*": ["./src/components/react/icons/*"],
+      "@/components/ui/*": [
+        "./src/components/react/ui/base/*",
+        "./src/components/react/ui/radix/*"
+      ],
+      "@/components/ui/radix/*": ["./src/components/react/ui/radix/*"],
       "@/*": ["./src/*"]
     }
   },

@@ -44,10 +44,10 @@ const messages: ExternalThreadMessage[] = [
 ];
 ```
 
-### 2. Create Runtime
+### 2. Create Config
 
 ```typescript
-const aui = useAui({
+const config = AuiConfig({
   threads: InMemoryThreadList({
     thread: () => ExternalThread({ messages, isRunning: false }),
   }),
@@ -57,7 +57,7 @@ const aui = useAui({
 ### 3. Provide to App
 
 ```typescript
-<AuiProvider value={aui}>
+<AuiProvider config={config}>
   <Thread.Root>
     <Thread.Messages />
   </Thread.Root>
@@ -140,7 +140,7 @@ You can extend this example to:
 
 ## Learn More
 
-- [Tap Documentation](../../packages/tap/README.md)
-- [Store Documentation](../../packages/store/README.md)
-- [Client Implementation](../../packages/react/src/client/README.md)
+- [Tap Documentation](https://github.com/assistant-ui/assistant-ui/tree/main/packages/tap)
+- [Store Documentation](https://github.com/assistant-ui/assistant-ui/tree/main/packages/store)
+- [Client Implementation](https://github.com/assistant-ui/assistant-ui/tree/main/packages/react/src/client)
 - [Assistant UI Docs](https://assistant-ui.com)

@@ -2,11 +2,9 @@ import type {
   Attachment,
   PendingAttachment,
   CompleteAttachment,
-} from "../types";
-
-// =============================================================================
-// Adapter Type
-// =============================================================================
+} from "../types/attachment";
+import type { ThreadUserMessagePart } from "../types/message";
+import { generateId } from "../utils/id";
 
 export type AttachmentAdapter = {
   accept: string;
@@ -17,16 +15,12 @@ export type AttachmentAdapter = {
   send(attachment: PendingAttachment): Promise<CompleteAttachment>;
 };
 
-// =============================================================================
-// Simple Image Attachment Adapter
-// =============================================================================
-
 export class SimpleImageAttachmentAdapter implements AttachmentAdapter {
   public accept = "image/*";
 
   public async add(state: { file: File }): Promise<PendingAttachment> {
     return {
-      id: state.file.name,
+      id: generateId(),
       type: "image",
       name: state.file.name,
       contentType: state.file.type,
@@ -55,25 +49,47 @@ export class SimpleImageAttachmentAdapter implements AttachmentAdapter {
   }
 }
 
-const getFileDataURL = (file: File) =>
-  new Promise<string>((resolve, reject) => {
+const bytesToBase64 = (bytes: Uint8Array): string => {
+  const nodeBuffer = (
+    globalThis as {
+      Buffer?: {
+        from(bytes: Uint8Array): { toString(encoding: string): string };
+      };
+    }
+  ).Buffer;
+  if (nodeBuffer) {
+    return nodeBuffer.from(bytes).toString("base64");
+  }
+  let binary = "";
+  const chunkSize = 0x8000;
+  for (let i = 0; i < bytes.length; i += chunkSize) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + chunkSize));
+  }
+  return btoa(binary);
+};
+
+// React Native's Blob polyfill has FileReader but not file.text()/arrayBuffer(); Node has
+// the reverse. Prefer FileReader when present, falling back to the Blob methods otherwise.
+export const getFileDataURL = async (file: File): Promise<string> => {
+  if (typeof FileReader === "undefined") {
+    const buffer = await file.arrayBuffer();
+    return `data:${file.type || "application/octet-stream"};base64,${bytesToBase64(new Uint8Array(buffer))}`;
+  }
+  return new Promise<string>((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = () => resolve(reader.result as string);
     reader.onerror = (error) => reject(error);
     reader.readAsDataURL(file);
   });
-
-// =============================================================================
-// Simple Text Attachment Adapter
-// =============================================================================
+};
 
 export class SimpleTextAttachmentAdapter implements AttachmentAdapter {
   public accept =
-    "text/plain,text/html,text/markdown,text/csv,text/xml,text/json,text/css";
+    "text/plain,text/html,text/markdown,text/csv,text/xml,text/json,application/json,text/css";
 
   public async add(state: { file: File }): Promise<PendingAttachment> {
     return {
-      id: state.file.name,
+      id: generateId(),
       type: "document",
       name: state.file.name,
       contentType: state.file.type,
@@ -102,19 +118,19 @@ export class SimpleTextAttachmentAdapter implements AttachmentAdapter {
   }
 }
 
-const getFileText = (file: File) =>
-  new Promise<string>((resolve, reject) => {
+const getFileText = async (file: File): Promise<string> => {
+  if (typeof FileReader === "undefined") {
+    return file.text();
+  }
+  return new Promise<string>((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = () => resolve(reader.result as string);
     reader.onerror = (error) => reject(error);
     reader.readAsText(file);
   });
+};
 
-// =============================================================================
-// Composite Attachment Adapter
-// =============================================================================
-
-function fileMatchesAccept(
+export function fileMatchesAccept(
   file: { name: string; type: string },
   acceptString: string,
 ) {
@@ -126,11 +142,11 @@ function fileMatchesAccept(
     .split(",")
     .map((type) => type.trim().toLowerCase());
 
-  const fileExtension = `.${file.name.split(".").pop()!.toLowerCase()}`;
-  const fileMimeType = file.type.toLowerCase();
+  const fileName = file.name.toLowerCase();
+  const fileMimeType = file.type.split(";", 1)[0]!.trim().toLowerCase();
 
   for (const type of allowedTypes) {
-    if (type.startsWith(".") && type === fileExtension) {
+    if (type.startsWith(".") && fileName.endsWith(type)) {
       return true;
     }
 
@@ -147,6 +163,75 @@ function fileMatchesAccept(
   }
 
   return false;
+}
+
+export function attachmentsEqual(
+  a: readonly CompleteAttachment[],
+  b: readonly CompleteAttachment[],
+): boolean {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) {
+    if (a[i]?.id !== b[i]?.id) return false;
+  }
+  return true;
+}
+
+export function partToCompleteAttachment(
+  part: Exclude<ThreadUserMessagePart, { type: "text" }>,
+): CompleteAttachment {
+  const id = generateId();
+
+  if (part.type === "image") {
+    return {
+      id,
+      type: "image",
+      name: part.filename ?? "image",
+      content: [part],
+      status: { type: "complete" },
+    };
+  }
+
+  if (part.type === "file") {
+    return {
+      id,
+      type: "document",
+      name: part.filename ?? "document",
+      contentType: part.mimeType,
+      content: [part],
+      status: { type: "complete" },
+    };
+  }
+
+  if (part.type === "audio") {
+    return {
+      id,
+      type: "audio",
+      name: `audio.${part.audio.format}`,
+      contentType: `audio/${part.audio.format}`,
+      content: [part],
+      status: { type: "complete" },
+    };
+  }
+
+  return {
+    id,
+    type: "data",
+    name: part.name,
+    content: [part],
+    status: { type: "complete" },
+  };
+}
+
+export function liftNonTextParts(
+  content: readonly ThreadUserMessagePart[],
+): CompleteAttachment[] {
+  const result: CompleteAttachment[] = [];
+  for (const part of content) {
+    if (part.type !== "text") {
+      result.push(partToCompleteAttachment(part));
+    }
+  }
+  return result;
 }
 
 export class CompositeAttachmentAdapter implements AttachmentAdapter {
@@ -194,7 +279,7 @@ export class CompositeAttachmentAdapter implements AttachmentAdapter {
     for (const adapter of adapters) {
       if (
         fileMatchesAccept(
-          {
+          attachment.file ?? {
             name: attachment.name,
             type: attachment.contentType ?? "",
           },

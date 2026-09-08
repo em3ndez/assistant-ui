@@ -1,14 +1,21 @@
 {
   "$schema": "https://turbo.build/schema.json",
   "ui": "tui",
+  "globalPassThroughEnv": ["ENABLE_EXPERIMENTAL_COREPACK"],
   "tasks": {
     "build": {
       "dependsOn": ["^build"],
-      "inputs": ["**/*.*", "!.next", "!.turbo"],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "!**/*.test.{ts,tsx}",
+        "!**/*.spec.{ts,tsx}",
+        "!**/__tests__/**"
+      ],
       "outputs": [
-        "dist",
+        "dist/**",
         ".next/**",
         "!.next/cache/**",
+        "!.next/dev/**",
         "generated/**",
         ".output/**",
         "build/**"
@@ -22,13 +29,17 @@
         "KV_*",
         "SENTRY_*",
         "REDIS_*",
-        "AI_GATEWAY_*",
-        "AUIX_*"
+        "ASSISTANT_*",
+        "AUIX_*",
+        "WEBMCP_ORIGIN_TRIAL_TOKEN"
       ]
     },
     "lint": {},
     "test": {
       "dependsOn": ["^build"]
+    },
+    "test:react-compiler": {
+      "dependsOn": ["build"]
     },
     "deploy": {
       "dependsOn": ["build", "lint", "test"]

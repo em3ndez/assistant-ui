@@ -1,36 +1,45 @@
-import { type FC, type PropsWithChildren } from "react";
-import { useAui, AuiProvider, type ClientOutput } from "@assistant-ui/store";
+import { type FC, type PropsWithChildren, useMemo } from "react";
+import {
+  useAui,
+  AuiConfig,
+  AuiProvider,
+  type ClientOutput,
+} from "@assistant-ui/store";
 import type { PartState } from "../../store/scopes/part";
-import { resource, tapMemo } from "@assistant-ui/tap";
 
-const TextMessagePartClient = resource(
-  ({
-    text,
-    isRunning,
-  }: {
-    text: string;
-    isRunning: boolean;
-  }): ClientOutput<"part"> => {
-    const state = tapMemo<PartState>(
-      () => ({
-        type: "text",
-        text,
-        status: isRunning ? { type: "running" } : { type: "complete" },
-      }),
-      [text, isRunning],
-    );
+import { resource } from "@assistant-ui/tap";
 
-    return {
-      getState: () => state,
-      addToolResult: () => {
-        throw new Error("Not supported");
-      },
-      resumeToolCall: () => {
-        throw new Error("Not supported");
-      },
-    };
-  },
-);
+const useTextMessagePartClient = ({
+  text,
+  isRunning,
+}: {
+  text: string;
+  isRunning: boolean;
+}): ClientOutput<"part"> => {
+  const state = useMemo<PartState>(
+    () => ({
+      type: "text",
+      text,
+      status: isRunning ? { type: "running" } : { type: "complete" },
+    }),
+    [text, isRunning],
+  );
+
+  return {
+    getState: () => state,
+    addToolResult: () => {
+      throw new Error("Not supported");
+    },
+    resumeToolCall: () => {
+      throw new Error("Not supported");
+    },
+    respondToToolApproval: () => {
+      throw new Error("Not supported");
+    },
+  };
+};
+
+const TextMessagePartClient = resource(useTextMessagePartClient);
 
 export const TextMessagePartProvider: FC<
   PropsWithChildren<{
@@ -38,9 +47,13 @@ export const TextMessagePartProvider: FC<
     isRunning?: boolean;
   }>
 > = ({ text, isRunning = false, children }) => {
-  const aui = useAui({
+  const aui = useAui();
+  const config = AuiConfig({
     part: TextMessagePartClient({ text, isRunning }),
   });
-
-  return <AuiProvider value={aui}>{children}</AuiProvider>;
+  return (
+    <AuiProvider extends={aui} config={config}>
+      {children}
+    </AuiProvider>
+  );
 };

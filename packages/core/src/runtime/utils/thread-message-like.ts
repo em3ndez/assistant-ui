@@ -1,12 +1,11 @@
 import { parsePartialJsonObject } from "assistant-stream/utils";
 import { generateId } from "../../utils/id";
+import { parseDataUrl } from "../../utils/data-url";
 import type {
-  MessageTiming,
   ReasoningMessagePart,
   SourceMessagePart,
   ThreadStep,
   MessageStatus,
-  TextMessagePart,
   ImageMessagePart,
   ThreadMessage,
   ThreadAssistantMessagePart,
@@ -14,12 +13,24 @@ import type {
   ThreadUserMessagePart,
   ThreadUserMessage,
   ThreadSystemMessage,
-  CompleteAttachment,
   FileMessagePart,
   DataMessagePart,
+  GenerativeUIMessagePart,
   Unstable_AudioMessagePart,
-} from "../../types";
-import { ReadonlyJSONObject, ReadonlyJSONValue } from "assistant-stream/utils";
+} from "../../types/message";
+import type { CompleteAttachment } from "../../types/attachment";
+import type {
+  MessageTiming,
+  PartProviderMetadata,
+  TextMessagePart,
+  ToolCallTiming,
+  ToolCallMessagePart,
+  ToolCallMessagePartMcpMetadata,
+} from "../../types/message";
+import type {
+  ReadonlyJSONObject,
+  ReadonlyJSONValue,
+} from "assistant-stream/utils";
 
 type DataPrefixedPart = {
   readonly type: `data-${string}`;
@@ -37,6 +48,7 @@ export type ThreadMessageLike = {
         | ImageMessagePart
         | FileMessagePart
         | DataMessagePart
+        | GenerativeUIMessagePart
         | Unstable_AudioMessagePart
         | DataPrefixedPart
         | {
@@ -50,6 +62,11 @@ export type ThreadMessageLike = {
             readonly isError?: boolean | undefined;
             readonly parentId?: string | undefined;
             readonly messages?: readonly ThreadMessage[] | undefined;
+            readonly interrupt?: { type: "human"; payload: unknown };
+            readonly timing?: ToolCallTiming;
+            readonly mcp?: ToolCallMessagePartMcpMetadata;
+            readonly providerMetadata?: PartProviderMetadata;
+            readonly approval?: NonNullable<ToolCallMessagePart["approval"]>;
           }
       )[];
   readonly id?: string | undefined;
@@ -70,6 +87,7 @@ export type ThreadMessageLike = {
         readonly steps?: readonly ThreadStep[] | undefined;
         readonly timing?: MessageTiming | undefined;
         readonly submittedFeedback?: { readonly type: "positive" | "negative" };
+        readonly isOptimistic?: boolean | undefined;
         readonly custom?: Record<string, unknown> | undefined;
       }
     | undefined;
@@ -83,6 +101,9 @@ const convertDataPrefixedPart = (
   return { type: "data", name: type.substring(5), data };
 };
 
+/**
+ * @deprecated This API is experimental and may change without notice.
+ */
 export const fromThreadMessageLike = (
   like: ThreadMessageLike,
   fallbackId: string,
@@ -103,10 +124,11 @@ export const fromThreadMessageLike = (
     image,
     ...rest
   }: ImageMessagePart): ImageMessagePart | null => {
-    const match = image.match(
-      /^data:image\/(png|jpeg|jpg|gif|webp);base64,(.*)$/,
-    );
-    if (match) {
+    if (typeof image !== "string") return null;
+    if (parseDataUrl(image)?.mimeType.startsWith("image/")) {
+      return { ...rest, image };
+    }
+    if (/^(https:\/\/|blob:)/i.test(image)) {
       return { ...rest, image };
     }
     console.warn(`Invalid image data format detected`);
@@ -132,8 +154,12 @@ export const fromThreadMessageLike = (
             const type = part.type;
             switch (type) {
               case "text":
+                if (!part.text?.trim()) return null;
+                return part;
+
               case "reasoning":
-                if (part.text.trim().length === 0) return null;
+                if (!part.text?.trim() && !part.unstable_summary?.trim())
+                  return null;
                 return part;
 
               case "file":
@@ -146,11 +172,14 @@ export const fromThreadMessageLike = (
               case "data":
                 return part;
 
+              case "generative-ui":
+                return part;
+
               case "tool-call": {
                 const { parentId, messages, ...basePart } = part;
                 const commonProps = {
                   ...basePart,
-                  toolCallId: part.toolCallId ?? `tool-${generateId()}`,
+                  toolCallId: part.toolCallId || `tool-${generateId()}`,
                   ...(parentId !== undefined && { parentId }),
                   ...(messages !== undefined && { messages }),
                 };
@@ -193,6 +222,7 @@ export const fromThreadMessageLike = (
           ...(metadata?.submittedFeedback && {
             submittedFeedback: metadata.submittedFeedback,
           }),
+          ...(metadata?.isOptimistic && { isOptimistic: true }),
         },
       } satisfies ThreadAssistantMessage;
 
@@ -232,6 +262,7 @@ export const fromThreadMessageLike = (
         })),
         metadata: {
           custom: metadata?.custom ?? {},
+          ...(metadata?.isOptimistic && { isOptimistic: true }),
         },
       } satisfies ThreadUserMessage;
 

@@ -6,7 +6,7 @@ import type {
   LanguageModelV2ToolCallPart,
   LanguageModelV2ToolResultPart,
 } from "@ai-sdk/provider";
-import type { ThreadMessage } from "@assistant-ui/react";
+import type { ThreadMessage } from "@assistant-ui/core";
 import {
   toGenericMessages,
   type GenericMessage,
@@ -14,16 +14,6 @@ import {
   type GenericToolCallPart,
   type GenericToolResultPart,
 } from "assistant-stream";
-
-function toUrl(value: string | URL): URL {
-  if (value instanceof URL) return value;
-  try {
-    return new URL(value);
-  } catch {
-    // For relative URLs, create URL with a dummy base
-    return new URL(value, "file://");
-  }
-}
 
 function convertUserContent(
   content: GenericMessage & { role: "user" },
@@ -34,8 +24,9 @@ function convertUserContent(
     }
     return {
       type: "file",
-      data: toUrl(part.data),
+      data: part.data,
       mediaType: part.mediaType,
+      ...(part.filename && { filename: part.filename }),
     };
   });
 }

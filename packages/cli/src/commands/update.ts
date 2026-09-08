@@ -1,9 +1,10 @@
 import { Command } from "commander";
 import fs from "node:fs";
 import path from "node:path";
-import { sync as spawnSync } from "cross-spawn";
 import { logger } from "../lib/utils/logger";
+import { logPackageJsonParseError } from "../lib/utils/package-json";
 import { getInstallCommand } from "../lib/utils/package-manager";
+import { runSpawn, SpawnExitError, SpawnSignalError } from "../lib/run-spawn";
 
 export const update = new Command()
   .name("update")
@@ -23,7 +24,15 @@ export const update = new Command()
       process.exit(1);
     }
 
-    const pkg = JSON.parse(fs.readFileSync(packageJsonPath, "utf-8"));
+    const packageJsonContent = fs.readFileSync(packageJsonPath, "utf-8");
+    let pkg: Record<string, Record<string, string> | undefined>;
+    try {
+      pkg = JSON.parse(packageJsonContent);
+    } catch {
+      logPackageJsonParseError(packageJsonPath, "update");
+      console.error("No changes were written.");
+      process.exit(1);
+    }
     const sections = ["dependencies", "devDependencies"];
     const targets: string[] = [];
 
@@ -64,14 +73,12 @@ export const update = new Command()
     }
 
     logger.step("Updating packages...");
-    const result = spawnSync(installCmd.command, installCmd.args, {
-      stdio: "inherit",
-      cwd: opts.cwd,
-    });
-
-    if (result.status !== 0) {
+    try {
+      await runSpawn(installCmd.command, installCmd.args, opts.cwd);
+    } catch (error) {
+      if (error instanceof SpawnSignalError) throw error;
       logger.error("Package manager update failed.");
-      process.exit(result.status || 1);
+      process.exit(error instanceof SpawnExitError ? error.code : 1);
     }
 
     logger.break();
