@@ -198,6 +198,9 @@ export class MessageRepository {
         this.selectPathTo(child);
       } else if (newParentOrRoot.next === null) {
         newParentOrRoot.next = child;
+        if (this.head === newParentOrRoot) {
+          this.head = findHead(child);
+        }
       }
 
       const newLevel = newParent ? newParent.level + 1 : 0;
