@@ -128,10 +128,23 @@ describe("createRedisSessionStore", () => {
       codec,
     });
 
-    await store.delete("session-1");
+    expect(await store.delete("session-1")).toBe(true);
     expect(calls[0]!.args).toEqual(["0", ""]);
 
-    await store.delete("session-1", 9_000);
+    expect(await store.delete("session-1", 9_000)).toBe(true);
     expect(calls[1]!.args).toEqual(["1", "9000"]);
+  });
+
+  it("resolves delete to false when the lease has moved on", async () => {
+    const { redis } = fakeRedis();
+    const store = createRedisSessionStore<Record<string, never>>({
+      redis: {
+        ...redis,
+        eval: async () => 0,
+      } as unknown as Redis,
+      codec,
+    });
+
+    expect(await store.delete("session-1", 9_000)).toBe(false);
   });
 });

@@ -50,8 +50,7 @@ if checkLease == '1' then
   local current = redis.call('HGET', key, '${LEASE_FIELD}')
   if (current or '') ~= expectedLease then return 0 end
 end
-redis.call('DEL', key)
-return 1
+return redis.call('DEL', key)
 `;
 
 export type RedisSessionStoreOptions = {
@@ -206,7 +205,7 @@ export function createRedisSessionStore<Data>(
     },
 
     async delete(id, ifLeaseUntil?: number) {
-      await redis.eval<string[], number>(
+      const applied = await redis.eval<string[], number>(
         DELETE_SCRIPT,
         [key(id)],
         [
@@ -214,6 +213,7 @@ export function createRedisSessionStore<Data>(
           ifLeaseUntil === undefined ? "" : String(ifLeaseUntil),
         ],
       );
+      return applied === 1;
     },
   };
 }
