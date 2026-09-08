@@ -82,6 +82,79 @@ describe("applyA2uiOperations", () => {
     });
   });
 
+  it.each(["10001", "4294967294"])(
+    "rejects array pointer index %s beyond the auto-vivification limit",
+    (index) => {
+      const dataModel = { items: [] };
+      const state: A2uiState = new Map([
+        ["main", { components: new Map(), dataModel }],
+      ]);
+
+      const result = applyA2uiOperations(state, [
+        {
+          version: "v1.0",
+          updateDataModel: {
+            surfaceId: "main",
+            path: `/items/${index}`,
+            value: "unsafe",
+          },
+        },
+      ]);
+
+      expect(result.warnings).toEqual([
+        "Operation at index 0 has an invalid JSON Pointer path.",
+      ]);
+      expect(result.state.get("main")?.dataModel).toBe(dataModel);
+      expect(dataModel.items).toHaveLength(0);
+    },
+  );
+
+  it("allows bounded expansion, existing large indices, and appends", () => {
+    const items = new Array<string | undefined>(10_002);
+    items[10_001] = "existing";
+    const state: A2uiState = new Map([
+      ["main", { components: new Map(), dataModel: { bounded: [], items } }],
+    ]);
+
+    const result = applyA2uiOperations(state, [
+      {
+        version: "v1.0",
+        updateDataModel: {
+          surfaceId: "main",
+          path: "/bounded/10000",
+          value: "limit",
+        },
+      },
+      {
+        version: "v1.0",
+        updateDataModel: {
+          surfaceId: "main",
+          path: "/items/10001",
+          value: "updated",
+        },
+      },
+      {
+        version: "v1.0",
+        updateDataModel: {
+          surfaceId: "main",
+          path: "/items/-",
+          value: "appended",
+        },
+      },
+    ]);
+
+    const resultModel = result.state.get("main")!.dataModel as {
+      bounded: string[];
+      items: string[];
+    };
+    expect(result.warnings).toEqual([]);
+    expect(resultModel.bounded).toHaveLength(10_001);
+    expect(resultModel.bounded[10_000]).toBe("limit");
+    expect(resultModel.items).toHaveLength(10_003);
+    expect(resultModel.items[10_001]).toBe("updated");
+    expect(resultModel.items[10_002]).toBe("appended");
+  });
+
   it("deletes object properties updated to null", () => {
     const dataModel = {
       profile: { name: "Ada", role: "admin" },
