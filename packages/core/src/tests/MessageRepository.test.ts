@@ -528,6 +528,31 @@ describe("MessageRepository", () => {
       ).toBe("parent-id");
     });
 
+    it("round-trips after reparenting under a later-added ancestor", () => {
+      const messageA = createTestMessage({ id: "A" });
+      repository.addOrUpdateMessage(null, messageA);
+      repository.addOrUpdateMessage("A", createTestMessage({ id: "B" }));
+      repository.addOrUpdateMessage("A", createTestMessage({ id: "C" }));
+      repository.addOrUpdateMessage(null, createTestMessage({ id: "X" }));
+      repository.addOrUpdateMessage("X", messageA);
+
+      const exported = repository.export();
+      expect(exported.messages.map((m) => m.message.id)).toEqual([
+        "X",
+        "A",
+        "B",
+        "C",
+      ]);
+
+      const restored = new MessageRepository();
+      restored.import(exported);
+
+      expect(restored.headId).toBe("B");
+      expect(restored.getMessages().map((m) => m.id)).toEqual(["X", "A", "B"]);
+      restored.switchToBranch("C");
+      expect(restored.getMessages().map((m) => m.id)).toEqual(["X", "A", "C"]);
+    });
+
     it("should import repository state", () => {
       const parent = createTestMessage({ id: "parent-id" });
       const child = createTestMessage({ id: "child-id" });
